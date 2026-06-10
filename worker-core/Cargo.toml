@@ -1,0 +1,24 @@
+[package]
+name = "worker-core"
+version = "0.1.0"
+edition = "2021"
+description = "Pathfinder compute core (corpus snapshot, A*, densify, transitions, PCA, cold-start projector) compiled to WASM for a Cloudflare Worker."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# wasm-opt can cap the externref table's max so workerd can't grow it at init
+# ("WebAssembly.Table.grow failed"). Skip it; the module is already tiny.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

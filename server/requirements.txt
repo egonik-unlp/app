@@ -1,0 +1,6 @@
+numpy
+onnxruntime
+qdrant-client
+requests
+sentence-transformers
+torch

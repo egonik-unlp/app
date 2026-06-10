@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.venv/
+server/.venv/
+.env
+.dev.vars
+.wrangler/
+
+# Rust / WASM build outputs
+worker-core/target/
+worker-core/pkg/
+
+# Generated snapshot artifacts (rebuild with tools/build_snapshot.py)
+public/data/

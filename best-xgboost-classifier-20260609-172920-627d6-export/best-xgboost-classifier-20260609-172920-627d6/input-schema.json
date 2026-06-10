@@ -1,0 +1,15 @@
+{
+  "required_numeric": [
+    "artist_popularity",
+    "track_popularity",
+    "artist_followers",
+    "release_year",
+    "artist_count"
+  ],
+  "required_categorical": [
+    "genre_primary",
+    "artist",
+    "album_type"
+  ],
+  "embedding_dim": 64
+}

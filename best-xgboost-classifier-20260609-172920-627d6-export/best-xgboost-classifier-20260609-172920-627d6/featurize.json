@@ -1,0 +1,770 @@
+{
+  "schema_version": 1,
+  "n_cols": 115,
+  "embedding_dim": 64,
+  "pca": {
+    "dims": 1,
+    "mean": [
+      0.016835174,
+      0.19003935,
+      0.020085372,
+      0.020656612,
+      -0.0004035963,
+      0.014748899,
+      -0.03661503,
+      -0.009735778,
+      0.04950901,
+      0.023790743,
+      0.14605263,
+      -0.20941819,
+      -0.01538723,
+      -0.1369161,
+      -0.15238228,
+      -0.07201432,
+      -0.05827791,
+      -0.10194419,
+      0.094547205,
+      -0.017120155,
+      -0.04964823,
+      0.048870128,
+      -0.031181,
+      0.046024323,
+      -0.22373368,
+      -0.06432616,
+      -0.0020647075,
+      0.0035804436,
+      -0.21769693,
+      -0.113532566,
+      0.005191348,
+      0.014937527,
+      0.17772329,
+      0.008559078,
+      0.13127595,
+      -0.071884006,
+      -0.04245774,
+      -0.008847233,
+      -0.010274212,
+      0.08928684,
+      -0.039702963,
+      -0.0032627578,
+      0.0074415426,
+      -0.07366126,
+      0.070180155,
+      0.02963753,
+      -0.0017064838,
+      0.02132668,
+      -0.029976822,
+      0.07627528,
+      0.17244148,
+      0.061041083,
+      -0.00518766,
+      0.24509878,
+      -0.0074417,
+      -0.21467942,
+      -0.011194957,
+      0.06376507,
+      -0.07246719,
+      0.09920452,
+      -0.010114999,
+      0.021530665,
+      -0.0008429269,
+      0.013705214
+    ],
+    "components_file": "pca_components.f32",
+    "components_shape": [
+      1,
+      64
+    ]
+  },
+  "columns": [
+    {
+      "op": "pca",
+      "component": 0
+    },
+    {
+      "op": "numeric_present_raw",
+      "field": "artist_popularity"
+    },
+    {
+      "op": "numeric_missing_flag",
+      "field": "artist_popularity"
+    },
+    {
+      "op": "numeric_present_raw",
+      "field": "track_popularity"
+    },
+    {
+      "op": "numeric_missing_flag",
+      "field": "track_popularity"
+    },
+    {
+      "op": "numeric_log1p",
+      "field": "artist_followers"
+    },
+    {
+      "op": "numeric_verbatim",
+      "field": "release_year"
+    },
+    {
+      "op": "numeric_verbatim",
+      "field": "artist_count"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative dance"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "album rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "unknown"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative metal"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dance pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "downtempo"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "big beat"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "indie rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "art pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "cumbia pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "modern rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "brooklyn indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dusseldorf electronic"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electronica"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "reggaeton"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "german alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "ambient"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electronica argentina"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "madchester"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "irish rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electro"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "horror synth"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "neotango"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "art rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "beatlesque"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "mellow gold"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "r&b en espanol"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "classic rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "french indie pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin alternative"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "colombian pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dark pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "brighton indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "__other__"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Rammstein"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Babasónicos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Radiohead"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kraftwerk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Muse"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Die Toten Hosen"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gorillaz"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Pink Floyd"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Underworld"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Smiths"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The xx"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Led Zeppelin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DIIV"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Stone Roses"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kurt Vile"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juana Molina"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "U2"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Daft Punk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Peces Raros"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Aphex Twin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Avalanches"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kyle Dixon & Michael Stein"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bajofondo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Robbie Williams"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Massive Attack"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Air"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juan Wauters"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bloc Party"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Portishead"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Moby"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gustavo Cerati"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Happy Mondays"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Kooks"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Blur"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Oasis"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Charly García"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sublime"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Depeche Mode"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Mató a un Policía Motorizado"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Franz Ferdinand"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Soda Stereo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gramatik"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Strokes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mi Amigo Invencible"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Laika Perra Rusa"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Usted Señalemelo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bandalos Chinos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Four Tet"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Perez"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Verve"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bad Bunny"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Beck"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Alan Parsons Project"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "CA7RIEL"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The 1975"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Prodigy"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Kuelgue"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "New Order"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Varese"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Arctic Monkeys"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "__other__"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "album"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "compilation"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "single"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "unknown"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "__other__"
+    }
+  ],
+  "column_names": [
+    "pca_0",
+    "artist_popularity",
+    "artist_popularity_missing",
+    "track_popularity",
+    "track_popularity_missing",
+    "artist_followers_log",
+    "release_year",
+    "artist_count",
+    "genre_primary=alternative rock",
+    "genre_primary=argentine indie",
+    "genre_primary=argentine rock",
+    "genre_primary=alternative dance",
+    "genre_primary=album rock",
+    "genre_primary=unknown",
+    "genre_primary=alternative metal",
+    "genre_primary=dance pop",
+    "genre_primary=argentine alternative rock",
+    "genre_primary=downtempo",
+    "genre_primary=big beat",
+    "genre_primary=alternative hip hop",
+    "genre_primary=indie rock",
+    "genre_primary=art pop",
+    "genre_primary=cumbia pop",
+    "genre_primary=modern rock",
+    "genre_primary=brooklyn indie",
+    "genre_primary=dusseldorf electronic",
+    "genre_primary=electronica",
+    "genre_primary=reggaeton",
+    "genre_primary=argentine hip hop",
+    "genre_primary=german alternative rock",
+    "genre_primary=latin hip hop",
+    "genre_primary=ambient",
+    "genre_primary=electronica argentina",
+    "genre_primary=madchester",
+    "genre_primary=irish rock",
+    "genre_primary=electro",
+    "genre_primary=horror synth",
+    "genre_primary=neotango",
+    "genre_primary=art rock",
+    "genre_primary=beatlesque",
+    "genre_primary=mellow gold",
+    "genre_primary=r&b en espanol",
+    "genre_primary=classic rock",
+    "genre_primary=french indie pop",
+    "genre_primary=latin alternative",
+    "genre_primary=colombian pop",
+    "genre_primary=dark pop",
+    "genre_primary=brighton indie",
+    "genre_primary=__other__",
+    "artist=Rammstein",
+    "artist=Babasónicos",
+    "artist=Radiohead",
+    "artist=Kraftwerk",
+    "artist=Muse",
+    "artist=Die Toten Hosen",
+    "artist=Gorillaz",
+    "artist=Pink Floyd",
+    "artist=Underworld",
+    "artist=The Smiths",
+    "artist=The xx",
+    "artist=Led Zeppelin",
+    "artist=DIIV",
+    "artist=The Stone Roses",
+    "artist=Kurt Vile",
+    "artist=Juana Molina",
+    "artist=U2",
+    "artist=Daft Punk",
+    "artist=Peces Raros",
+    "artist=Aphex Twin",
+    "artist=The Avalanches",
+    "artist=Kyle Dixon & Michael Stein",
+    "artist=Bajofondo",
+    "artist=Robbie Williams",
+    "artist=Massive Attack",
+    "artist=Air",
+    "artist=Juan Wauters",
+    "artist=Bloc Party",
+    "artist=Portishead",
+    "artist=Moby",
+    "artist=Gustavo Cerati",
+    "artist=Happy Mondays",
+    "artist=The Kooks",
+    "artist=Blur",
+    "artist=Oasis",
+    "artist=Charly García",
+    "artist=Sublime",
+    "artist=Depeche Mode",
+    "artist=El Mató a un Policía Motorizado",
+    "artist=Franz Ferdinand",
+    "artist=Soda Stereo",
+    "artist=Gramatik",
+    "artist=The Strokes",
+    "artist=Mi Amigo Invencible",
+    "artist=Laika Perra Rusa",
+    "artist=Usted Señalemelo",
+    "artist=Bandalos Chinos",
+    "artist=Four Tet",
+    "artist=Perez",
+    "artist=The Verve",
+    "artist=Bad Bunny",
+    "artist=Beck",
+    "artist=The Alan Parsons Project",
+    "artist=CA7RIEL",
+    "artist=The 1975",
+    "artist=The Prodigy",
+    "artist=El Kuelgue",
+    "artist=New Order",
+    "artist=Varese",
+    "artist=Arctic Monkeys",
+    "artist=__other__",
+    "album_type=album",
+    "album_type=compilation",
+    "album_type=single",
+    "album_type=unknown",
+    "album_type=__other__"
+  ],
+  "target": {
+    "field": "metadata.rotation",
+    "transform": "none",
+    "clamp_nonnegative": true
+  }
+}

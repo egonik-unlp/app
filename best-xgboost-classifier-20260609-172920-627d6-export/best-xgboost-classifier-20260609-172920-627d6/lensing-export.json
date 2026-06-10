@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "format": "onnx",
+  "producer": "lensing/xgboost-classifier",
+  "framework_version": "0.1.0",
+  "model": {
+    "name": "best-xgboost-classifier-20260609-172920-627d6",
+    "run_id": "run-20260609-172920-627d6-xgboost-classifier",
+    "predictor": "xgboost-classifier",
+    "dataset_id": "ds-20260609-141622-p1-s42",
+    "created_at": "2026-06-09T17:29:22.374555606+00:00",
+    "notes": "source: best-models auto"
+  },
+  "target": {
+    "field": "metadata.rotation",
+    "transform": "none",
+    "task": "regression"
+  },
+  "n_features": 115,
+  "embedding_dim": 64,
+  "ensemble": false,
+  "files": [
+    "README.md",
+    "featurize.json",
+    "input-schema.json",
+    "lensing-export.json",
+    "model.onnx",
+    "pca_components.f32"
+  ]
+}

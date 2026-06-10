@@ -1,0 +1,22 @@
+name = "spotify-pathfinder-visualizer"
+main = "worker/index.ts"
+compatibility_date = "2026-06-10"
+
+# Static UI + bundled data snapshot (corpus.bin / transitions.json /
+# projector.bin live under public/data and are copied into dist by Vite).
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+# Workers AI — bge-m3 text embedding for cold-start of arbitrary Spotify tracks.
+[ai]
+binding = "AI"
+
+# Spotify credentials are NOT vars — set them as secrets for deploy:
+#   wrangler secret put SPOTIFY_CLIENT_ID
+#   wrangler secret put SPOTIFY_CLIENT_SECRET
+# For local `wrangler dev`, put them in .dev.vars (gitignored).
+#
+# Optional override of the embedding model:
+# [vars]
+# EMBED_MODEL = "@cf/baai/bge-m3"
