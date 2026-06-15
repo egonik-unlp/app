@@ -15,14 +15,28 @@ that bakes the corpus into static files.
 
 ```
 Browser ── static UI (React + Three.js) ─────────────┐  served by ASSETS binding
-   /api/search ─┐                                     │
-   /api/route  ─┤── Worker (worker/index.ts) ─────────┘
-                │     ├─ AI binding   → bge-m3 embedding (cold-start only)
-                │     ├─ fetch        → Spotify search/meta + ReccoBeats
+   /api/search  ─┐                                    │
+   /api/route   ─┤── Worker (worker/index.ts) ────────┘
+   /api/config  ─┤     ├─ AI binding   → bge-m3 embedding (cold-start only)
+   /api/preview ─┘     ├─ fetch        → Spotify search/meta + ReccoBeats + iTunes
                 │     ├─ ASSETS       → loads public/data/* once per isolate
                 │     └─ WASM core    → snap · A* · densify · transitions · PCA
                 └─ (no Qdrant, no Python, no second origin)
 ```
+
+## Make the journey playable
+
+The journey strip has two actions:
+
+- **Play journey** — plays a 30-second sample of each stop back-to-back, the 3D
+  tracer following along (a "musical procession"). Samples come from the
+  **iTunes Search API** (`/api/preview`), matched by artist+track — Spotify's own
+  `preview_url` was deprecated in Nov 2024. No login, works for everyone.
+- **Save as playlist** — creates the route as a real Spotify playlist on the
+  listener's account. Uses browser-side **OAuth (Authorization Code + PKCE)** with
+  the public `SPOTIFY_CLIENT_ID` (no secret, no server session). **Register the
+  app origin as a Redirect URI** in the Spotify dashboard — `http://127.0.0.1:8787/`
+  for dev and `https://<your-worker>.workers.dev/` for deploy — or sign-in fails.
 
 The pathfinding (`worker-core/`) is a faithful Rust port of
 `../spotify-predict-engagement/pathfinder/search.py` (same cost weights,

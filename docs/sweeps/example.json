@@ -1,0 +1,1046 @@
+{
+ "context": "evening \u00b7 shuffle",
+ "start_row": 96,
+ "end_row": 0,
+ "expansions": 17628,
+ "n_path": 9,
+ "n_cloud": 55,
+ "total_cost": 6.489,
+ "start": {
+  "name": "Tour de France (Etape 2) - 2009 Remaster",
+  "artist": "Kraftwerk",
+  "genre": "dusseldorf electronic",
+  "uri": "spotify:track:4VHTOWCMRnKAgg4a9AKdwQ",
+  "fit": 0.876
+ },
+ "end": {
+  "name": "Intro",
+  "artist": "Muse",
+  "genre": "modern rock",
+  "uri": "spotify:track:6WjCx1xsaJ3buDczDMhEek",
+  "fit": 0.542
+ },
+ "steps": [
+  {
+   "i": 0,
+   "name": "Tour de France (Etape 2) - 2009 Remaster",
+   "artist": "Kraftwerk",
+   "genre": "dusseldorf electronic",
+   "fit": 0.876,
+   "h": 0.652,
+   "pos": [
+    -7.86,
+    -2.25,
+    1.43
+   ]
+  },
+  {
+   "i": 1,
+   "name": "The Model - Live",
+   "artist": "Kraftwerk",
+   "genre": "dusseldorf electronic",
+   "fit": 0.839,
+   "h": 0.602,
+   "pos": [
+    -7.45,
+    -1.06,
+    -1.25
+   ],
+   "terms": {
+    "dist": 0.094,
+    "fit": 0.08,
+    "div": 0.0,
+    "trans": 0.6,
+    "ctx": 0.0,
+    "total": 0.774
+   },
+   "why": {
+    "dist": 0.094,
+    "fit": 0.839,
+    "trans": 0.119,
+    "ctx": 1.18,
+    "genre_jump": false
+   }
+  },
+  {
+   "i": 2,
+   "name": "Song For Junior - Remastered 2009",
+   "artist": "Beastie Boys",
+   "genre": "alternative rock",
+   "fit": 0.577,
+   "h": 0.494,
+   "pos": [
+    -3.61,
+    1.67,
+    -3.87
+   ],
+   "terms": {
+    "dist": 0.135,
+    "fit": 0.211,
+    "div": 0.075,
+    "trans": 0.0,
+    "ctx": 0.0,
+    "total": 0.421
+   },
+   "why": {
+    "dist": 0.135,
+    "fit": 0.577,
+    "trans": 0.016,
+    "ctx": 1.02,
+    "genre_jump": true
+   }
+  },
+  {
+   "i": 3,
+   "name": "Beyond",
+   "artist": "Daft Punk",
+   "genre": "electro",
+   "fit": 0.684,
+   "h": 0.445,
+   "pos": [
+    -0.81,
+    3.59,
+    -1.01
+   ],
+   "terms": {
+    "dist": 0.138,
+    "fit": 0.158,
+    "div": 0.075,
+    "trans": 0.571,
+    "ctx": 0.12,
+    "total": 1.062
+   },
+   "why": {
+    "dist": 0.138,
+    "fit": 0.684,
+    "trans": 0.007,
+    "ctx": 0.972,
+    "genre_jump": true
+   }
+  },
+  {
+   "i": 4,
+   "name": "Veridis Quo",
+   "artist": "Daft Punk",
+   "genre": "electro",
+   "fit": 0.866,
+   "h": 0.447,
+   "pos": [
+    2.51,
+    3.81,
+    2.42
+   ],
+   "terms": {
+    "dist": 0.124,
+    "fit": 0.067,
+    "div": 0.0,
+    "trans": 0.0,
+    "ctx": 0.091,
+    "total": 0.282
+   },
+   "why": {
+    "dist": 0.124,
+    "fit": 0.866,
+    "trans": 0.181,
+    "ctx": 1.054,
+    "genre_jump": false
+   }
+  },
+  {
+   "i": 5,
+   "name": "Videotape",
+   "artist": "Radiohead",
+   "genre": "alternative rock",
+   "fit": 0.871,
+   "h": 0.333,
+   "pos": [
+    5.18,
+    1.54,
+    0.83
+   ],
+   "terms": {
+    "dist": 0.137,
+    "fit": 0.065,
+    "div": 0.075,
+    "trans": 0.025,
+    "ctx": 0.272,
+    "total": 0.574
+   },
+   "why": {
+    "dist": 0.137,
+    "fit": 0.871,
+    "trans": 0.007,
+    "ctx": 1.02,
+    "genre_jump": true
+   }
+  },
+  {
+   "i": 6,
+   "name": "Screenager",
+   "artist": "Muse",
+   "genre": "modern rock",
+   "fit": 0.504,
+   "h": 0.277,
+   "pos": [
+    4.55,
+    0.15,
+    0.57
+   ],
+   "terms": {
+    "dist": 0.085,
+    "fit": 0.248,
+    "div": 0.075,
+    "trans": 0.585,
+    "ctx": 0.0,
+    "total": 0.993
+   },
+   "why": {
+    "dist": 0.085,
+    "fit": 0.504,
+    "trans": 0.007,
+    "ctx": 1.267,
+    "genre_jump": true
+   }
+  },
+  {
+   "i": 7,
+   "name": "The Ocean - Remastered 2008",
+   "artist": "U2",
+   "genre": "irish rock",
+   "fit": 0.192,
+   "h": 0.138,
+   "pos": [
+    6.14,
+    -1.96,
+    -0.98
+   ],
+   "terms": {
+    "dist": 0.094,
+    "fit": 0.404,
+    "div": 0.075,
+    "trans": 0.6,
+    "ctx": 0.183,
+    "total": 1.356
+   },
+   "why": {
+    "dist": 0.094,
+    "fit": 0.192,
+    "trans": 0.0,
+    "ctx": 1.052,
+    "genre_jump": true
+   }
+  },
+  {
+   "i": 8,
+   "name": "Intro",
+   "artist": "Muse",
+   "genre": "modern rock",
+   "fit": 0.542,
+   "h": -0.0,
+   "pos": [
+    4.5,
+    -5.82,
+    -0.61
+   ],
+   "terms": {
+    "dist": 0.138,
+    "fit": 0.229,
+    "div": 0.075,
+    "trans": 0.585,
+    "ctx": 0.0,
+    "total": 1.027
+   },
+   "why": {
+    "dist": 0.138,
+    "fit": 0.542,
+    "trans": 0.008,
+    "ctx": 1.267,
+    "genre_jump": true
+   }
+  }
+ ],
+ "decisions": [
+  {
+   "i": 0,
+   "from": "Kraftwerk",
+   "n_cands": 20,
+   "chosen": "Kraftwerk",
+   "chosen_rank": 3,
+   "cands": [
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.625,
+     "h": 0.498,
+     "prio": 1.123,
+     "chosen": false
+    },
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.79,
+     "h": 0.513,
+     "prio": 1.302,
+     "chosen": false
+    },
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.875,
+     "h": 0.485,
+     "prio": 1.36,
+     "chosen": false
+    },
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.774,
+     "h": 0.602,
+     "prio": 1.376,
+     "chosen": true
+    },
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.836,
+     "h": 0.56,
+     "prio": 1.397,
+     "chosen": false
+    },
+    {
+     "artist": "Kraftwerk",
+     "genre": "dusseldorf electronic",
+     "step": 0.751,
+     "h": 0.65,
+     "prio": 1.4,
+     "chosen": false
+    }
+   ]
+  },
+  {
+   "i": 1,
+   "from": "Kraftwerk",
+   "n_cands": 3,
+   "chosen": "Beastie Boys",
+   "chosen_rank": 0,
+   "cands": [
+    {
+     "artist": "Beastie Boys",
+     "genre": "alternative rock",
+     "step": 0.421,
+     "h": 0.494,
+     "prio": 0.915,
+     "chosen": true
+    },
+    {
+     "artist": "The Future Sound Of London",
+     "genre": "abstract",
+     "step": 1.129,
+     "h": 0.529,
+     "prio": 1.658,
+     "chosen": false
+    },
+    {
+     "artist": "The Rapture",
+     "genre": "alternative dance",
+     "step": 1.091,
+     "h": 0.646,
+     "prio": 1.737,
+     "chosen": false
+    }
+   ]
+  },
+  {
+   "i": 2,
+   "from": "Beastie Boys",
+   "n_cands": 19,
+   "chosen": "Daft Punk",
+   "chosen_rank": 4,
+   "cands": [
+    {
+     "artist": "Blur",
+     "genre": "alternative rock",
+     "step": 0.532,
+     "h": 0.488,
+     "prio": 1.019,
+     "chosen": false
+    },
+    {
+     "artist": "Blur",
+     "genre": "alternative rock",
+     "step": 0.597,
+     "h": 0.479,
+     "prio": 1.076,
+     "chosen": false
+    },
+    {
+     "artist": "Blur",
+     "genre": "alternative rock",
+     "step": 0.529,
+     "h": 0.584,
+     "prio": 1.113,
+     "chosen": false
+    },
+    {
+     "artist": "Gorillaz",
+     "genre": "alternative hip hop",
+     "step": 0.922,
+     "h": 0.495,
+     "prio": 1.417,
+     "chosen": false
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 1.062,
+     "h": 0.445,
+     "prio": 1.507,
+     "chosen": true
+    },
+    {
+     "artist": "Rammstein",
+     "genre": "alternative metal",
+     "step": 0.955,
+     "h": 0.619,
+     "prio": 1.575,
+     "chosen": false
+    }
+   ]
+  },
+  {
+   "i": 3,
+   "from": "Daft Punk",
+   "n_cands": 19,
+   "chosen": "Daft Punk",
+   "chosen_rank": 1,
+   "cands": [
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.204,
+     "h": 0.497,
+     "prio": 0.701,
+     "chosen": false
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.282,
+     "h": 0.447,
+     "prio": 0.729,
+     "chosen": true
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.317,
+     "h": 0.473,
+     "prio": 0.791,
+     "chosen": false
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.362,
+     "h": 0.445,
+     "prio": 0.807,
+     "chosen": false
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.388,
+     "h": 0.456,
+     "prio": 0.844,
+     "chosen": false
+    },
+    {
+     "artist": "Daft Punk",
+     "genre": "electro",
+     "step": 0.399,
+     "h": 0.515,
+     "prio": 0.914,
+     "chosen": false
+    }
+   ]
+  },
+  {
+   "i": 4,
+   "from": "Daft Punk",
+   "n_cands": 7,
+   "chosen": "Radiohead",
+   "chosen_rank": 1,
+   "cands": [
+    {
+     "artist": "The Strokes",
+     "genre": "alternative rock",
+     "step": 0.547,
+     "h": 0.329,
+     "prio": 0.876,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.574,
+     "h": 0.333,
+     "prio": 0.907,
+     "chosen": true
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.552,
+     "h": 0.46,
+     "prio": 1.013,
+     "chosen": false
+    },
+    {
+     "artist": "Moby",
+     "genre": "downtempo",
+     "step": 0.675,
+     "h": 0.385,
+     "prio": 1.06,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.686,
+     "h": 0.434,
+     "prio": 1.12,
+     "chosen": false
+    },
+    {
+     "artist": "Marvin Gaye",
+     "genre": "classic soul",
+     "step": 1.197,
+     "h": 0.375,
+     "prio": 1.572,
+     "chosen": false
+    }
+   ]
+  },
+  {
+   "i": 5,
+   "from": "Radiohead",
+   "n_cands": 19,
+   "chosen": "Muse",
+   "chosen_rank": 7,
+   "cands": [
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.231,
+     "h": 0.338,
+     "prio": 0.569,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.388,
+     "h": 0.292,
+     "prio": 0.679,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.284,
+     "h": 0.459,
+     "prio": 0.744,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.312,
+     "h": 0.46,
+     "prio": 0.773,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.458,
+     "h": 0.434,
+     "prio": 0.892,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.572,
+     "h": 0.327,
+     "prio": 0.899,
+     "chosen": false
+    },
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 0.993,
+     "h": 0.277,
+     "prio": 1.27,
+     "chosen": true
+    }
+   ]
+  },
+  {
+   "i": 6,
+   "from": "Muse",
+   "n_cands": 19,
+   "chosen": "U2",
+   "chosen_rank": 8,
+   "cands": [
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 0.222,
+     "h": 0.428,
+     "prio": 0.65,
+     "chosen": false
+    },
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 0.327,
+     "h": 0.405,
+     "prio": 0.732,
+     "chosen": false
+    },
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 0.373,
+     "h": 0.394,
+     "prio": 0.767,
+     "chosen": false
+    },
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 0.345,
+     "h": 0.544,
+     "prio": 0.89,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 1.002,
+     "h": 0.338,
+     "prio": 1.341,
+     "chosen": false
+    },
+    {
+     "artist": "The Strokes",
+     "genre": "alternative rock",
+     "step": 1.044,
+     "h": 0.329,
+     "prio": 1.373,
+     "chosen": false
+    },
+    {
+     "artist": "U2",
+     "genre": "irish rock",
+     "step": 1.356,
+     "h": 0.138,
+     "prio": 1.495,
+     "chosen": true
+    }
+   ]
+  },
+  {
+   "i": 7,
+   "from": "U2",
+   "n_cands": 19,
+   "chosen": "Muse",
+   "chosen_rank": 2,
+   "cands": [
+    {
+     "artist": "U2",
+     "genre": "irish rock",
+     "step": 0.532,
+     "h": 0.138,
+     "prio": 0.671,
+     "chosen": false
+    },
+    {
+     "artist": "U2",
+     "genre": "irish rock",
+     "step": 0.701,
+     "h": 0.265,
+     "prio": 0.966,
+     "chosen": false
+    },
+    {
+     "artist": "Muse",
+     "genre": "modern rock",
+     "step": 1.027,
+     "h": -0.0,
+     "prio": 1.027,
+     "chosen": true
+    },
+    {
+     "artist": "Charly Garc\u00eda",
+     "genre": "argentine rock",
+     "step": 1.053,
+     "h": 0.19,
+     "prio": 1.243,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 0.953,
+     "h": 0.293,
+     "prio": 1.246,
+     "chosen": false
+    },
+    {
+     "artist": "Radiohead",
+     "genre": "alternative rock",
+     "step": 1.076,
+     "h": 0.292,
+     "prio": 1.368,
+     "chosen": false
+    }
+   ]
+  }
+ ],
+ "cloud_pos": [
+  [
+   -7.99,
+   -3.16,
+   0.99
+  ],
+  [
+   -6.12,
+   -4.31,
+   1.6
+  ],
+  [
+   -6.52,
+   -2.06,
+   4.11
+  ],
+  [
+   -6.69,
+   -2.5,
+   4.1
+  ],
+  [
+   -7.76,
+   -3.37,
+   2.5
+  ],
+  [
+   -7.03,
+   -1.33,
+   0.66
+  ],
+  [
+   -6.42,
+   -2.61,
+   0.53
+  ],
+  [
+   -6.52,
+   -2.94,
+   0.51
+  ],
+  [
+   -7.81,
+   0.09,
+   -0.5
+  ],
+  [
+   -7.0,
+   -0.78,
+   0.19
+  ],
+  [
+   -7.02,
+   -0.91,
+   0.81
+  ],
+  [
+   -6.72,
+   0.41,
+   0.11
+  ],
+  [
+   -6.4,
+   -1.7,
+   2.18
+  ],
+  [
+   -2.32,
+   1.3,
+   -4.42
+  ],
+  [
+   -3.35,
+   2.45,
+   -3.86
+  ],
+  [
+   -3.82,
+   1.29,
+   -5.12
+  ],
+  [
+   -4.11,
+   2.18,
+   -4.58
+  ],
+  [
+   -4.11,
+   2.22,
+   -4.36
+  ],
+  [
+   -3.8,
+   0.88,
+   -4.4
+  ],
+  [
+   -0.93,
+   2.49,
+   1.61
+  ],
+  [
+   -1.24,
+   3.57,
+   -0.97
+  ],
+  [
+   -0.82,
+   4.02,
+   -0.19
+  ],
+  [
+   -0.02,
+   4.45,
+   2.73
+  ],
+  [
+   -1.36,
+   4.43,
+   2.16
+  ],
+  [
+   2.64,
+   3.46,
+   0.54
+  ],
+  [
+   -0.34,
+   2.69,
+   -4.21
+  ],
+  [
+   -1.03,
+   4.54,
+   0.32
+  ],
+  [
+   1.55,
+   5.01,
+   3.57
+  ],
+  [
+   -0.2,
+   2.46,
+   1.65
+  ],
+  [
+   1.44,
+   4.22,
+   2.52
+  ],
+  [
+   0.02,
+   4.7,
+   2.37
+  ],
+  [
+   2.16,
+   1.13,
+   -0.53
+  ],
+  [
+   4.84,
+   2.25,
+   1.04
+  ],
+  [
+   5.57,
+   -0.73,
+   1.32
+  ],
+  [
+   4.84,
+   3.56,
+   1.46
+  ],
+  [
+   4.92,
+   1.05,
+   -0.84
+  ],
+  [
+   3.41,
+   0.79,
+   1.33
+  ],
+  [
+   4.3,
+   0.76,
+   -0.2
+  ],
+  [
+   3.65,
+   1.3,
+   -0.79
+  ],
+  [
+   3.63,
+   1.58,
+   1.59
+  ],
+  [
+   6.14,
+   -1.96,
+   -0.98
+  ],
+  [
+   4.6,
+   0.34,
+   1.91
+  ],
+  [
+   3.89,
+   0.79,
+   0.15
+  ],
+  [
+   5.71,
+   -1.01,
+   0.47
+  ],
+  [
+   5.55,
+   0.86,
+   -0.51
+  ],
+  [
+   5.64,
+   0.16,
+   0.55
+  ],
+  [
+   5.05,
+   -1.7,
+   -0.5
+  ],
+  [
+   5.77,
+   1.25,
+   -1.82
+  ],
+  [
+   4.55,
+   -2.09,
+   -0.78
+  ],
+  [
+   4.31,
+   -8.42,
+   -0.32
+  ],
+  [
+   3.55,
+   -3.95,
+   -1.45
+  ],
+  [
+   3.77,
+   -5.89,
+   -1.1
+  ],
+  [
+   4.91,
+   -7.41,
+   0.47
+  ],
+  [
+   3.31,
+   -7.03,
+   -1.91
+  ],
+  [
+   4.62,
+   -6.47,
+   0.74
+  ]
+ ],
+ "cloud_genre": [
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "dusseldorf electronic",
+  "argentine rock",
+  "brazilian rock",
+  "art punk",
+  "art punk",
+  "alternative dance",
+  "alternative rock",
+  "electro",
+  "electro",
+  "electro",
+  "electro",
+  "electro",
+  "electro",
+  "cologne indie",
+  "electro",
+  "electro",
+  "electro",
+  "electro",
+  "electro",
+  "french indie pop",
+  "alternative rock",
+  "alternative rock",
+  "alternative rock",
+  "alternative metal",
+  "alternative rock",
+  "alternative rock",
+  "downtempo",
+  "modern rock",
+  "irish rock",
+  "modern rock",
+  "alternative hip hop",
+  "unknown",
+  "r&b en espanol",
+  "alternative rock",
+  "irish rock",
+  "r&b en espanol",
+  "argentine rock",
+  "alternative dance",
+  "electronica",
+  "indie garage rock",
+  "electronica",
+  "indie garage rock",
+  "city pop"
+ ]
+}
