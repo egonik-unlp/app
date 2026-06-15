@@ -2,6 +2,13 @@ name = "spotify-pathfinder-visualizer"
 main = "worker/index.ts"
 compatibility_date = "2026-06-10"
 
+# NOTE: this account is on the Workers Free plan (~10 ms CPU/request). A* over the
+# 23k-track graph can exceed that for far-apart pairs (→ 503). Alternatives are
+# therefore opt-in (a toggle) and best-effort. On Workers Paid, add:
+#   [limits]
+#   cpu_ms = 1000
+# to let expensive routes and alternatives complete reliably.
+
 # Static UI + bundled data snapshot (corpus.bin / transitions.json /
 # projector.bin live under public/data and are copied into dist by Vite).
 [assets]
