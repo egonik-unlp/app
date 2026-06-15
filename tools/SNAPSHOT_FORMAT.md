@@ -31,6 +31,22 @@ off  type          field
 KNN neighbors are symmetric and sorted by ascending cosine distance, matching
 `server/app.py:build_knn`.
 
+## `layout.bin`  (magic `PFL1`) — shared 3D galaxy
+
+A baked global 3D layout (t-SNE over the 64-d latent) giving every corpus track a
+fixed home, so the splash sample and any traced route render in the **same**
+coordinate space. Built by `tools/build_layout.py` from `corpus.bin` (no Qdrant);
+loaded by the Rust core via `set_layout`, and `sample_field` / `route` read these
+coords instead of a per-view PCA. Row order matches `corpus.bin`.
+
+```
+off  type        field
+0    u8[4]       magic = "PFL1"
+4    u32         version = 1
+8    u32         n
+12   f32[n*3]    xyz, row-major (same order as corpus ids)
+```
+
 ## `transitions.json`
 
 Shipped verbatim from `spotify-predict-engagement/pathfinder/transitions.json`

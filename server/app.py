@@ -22,7 +22,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 SIBLING = ROOT.parent / "spotify-predict-engagement"
-MODEL_DIR = ROOT / "best-xgboost-classifier-20260609-172920-627d6-export" / "best-xgboost-classifier-20260609-172920-627d6"
+MODEL_DIR = ROOT / "burn-deep-embeddings-highvocab-export" / "burn-deep-embeddings-highvocab"
 ARTIFACTS = SIBLING / "pipeline" / "artifacts"
 TRANSITIONS_JSON = SIBLING / "pathfinder" / "transitions.json"
 
