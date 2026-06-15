@@ -10,5 +10,11 @@ server/.venv/
 worker-core/target/
 worker-core/pkg/
 
-# Generated snapshot artifacts (rebuild with tools/build_snapshot.py)
+# Generated snapshot artifacts (rebuild with tools/build_snapshot.py /
+# tools/build_layout.py)
 public/data/
+public/data.bak-*/
+
+# Build artifacts
+__pycache__/
+*.tsbuildinfo
