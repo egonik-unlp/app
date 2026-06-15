@@ -10,6 +10,7 @@ import {
   initSync,
   load_corpus,
   set_projector,
+  set_layout,
   info,
   find_row,
   vec_at,
@@ -17,6 +18,7 @@ import {
   route as wasmRoute,
   project_and_snap,
   search as corpusSearch,
+  sample_field,
 } from "../worker-core/pkg/worker_core.js";
 import wasmModule from "../worker-core/pkg/worker_core_bg.wasm";
 
@@ -63,6 +65,15 @@ async function ensureReady(env: Env) {
           console.warn("projector load failed:", e);
         }
       }
+      // Baked global 3D layout — shared coordinate space for splash + route.
+      const layout = await assetBytes(env, "/data/layout.bin");
+      if (layout) {
+        try {
+          set_layout(layout);
+        } catch (e) {
+          console.warn("layout load failed:", e);
+        }
+      }
       const inf = JSON.parse(info());
       return { hasProjector, tracks: inf.n as number };
     })();
@@ -74,6 +85,27 @@ async function assetBytes(env: Env, path: string): Promise<Uint8Array | null> {
   const res = await env.ASSETS.fetch(new Request(`https://assets${path}`));
   if (!res.ok) return null;
   return new Uint8Array(await res.arrayBuffer());
+}
+
+// retry transient Spotify/ReccoBeats failures (429 + 5xx) with backoff,
+// honoring Retry-After. workerd's local outbound is also flaky, so this helps dev.
+async function fetchRetry(input: RequestInfo | URL, init?: RequestInit, attempts = 3): Promise<Response> {
+  let last: Response | null = null
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const r = await fetch(input, init)
+      if (r.status !== 429 && r.status < 500) return r
+      last = r
+    } catch (e) {
+      if (i === attempts - 1) throw e
+    }
+    if (i < attempts - 1) {
+      const ra = last ? Number(last.headers.get('retry-after')) : NaN
+      const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 250 * (i + 1)
+      await new Promise((res) => setTimeout(res, Math.min(wait, 2000)))
+    }
+  }
+  return last as Response
 }
 
 // ---- Spotify + ReccoBeats --------------------------------------------------
@@ -89,7 +121,7 @@ async function spotifyTokenGet(env: Env): Promise<string> {
   }
   if (spotifyToken && spotifyToken.exp > Date.now() / 1000 + 30) return spotifyToken.value;
   const auth = btoa(`${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`);
-  const r = await fetch(SPOTIFY_TOKEN_URL, {
+  const r = await fetchRetry(SPOTIFY_TOKEN_URL, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials",
@@ -103,8 +135,14 @@ async function spotifyTokenGet(env: Env): Promise<string> {
 async function spotifyGet(env: Env, path: string, params?: Record<string, string>): Promise<any> {
   const url = new URL(`${SPOTIFY_API}/${path}`);
   if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${await spotifyTokenGet(env)}` } });
-  if (!r.ok) throw new ApiError(502, `Spotify request failed (${r.status})`);
+  const r = await fetchRetry(url, { headers: { Authorization: `Bearer ${await spotifyTokenGet(env)}` } });
+  if (!r.ok) {
+    const msg =
+      r.status === 429
+        ? "Spotify is rate-limiting requests — give it a moment and try again."
+        : `Spotify request failed (${r.status})`;
+    throw new ApiError(r.status === 429 ? 429 : 502, msg);
+  }
   return r.json();
 }
 
@@ -126,13 +164,84 @@ async function searchSpotify(env: Env, query: string, limit = 10): Promise<any[]
   });
 }
 
+// Free 30s previews for the procession playback. Spotify's own preview_url was
+// deprecated in Nov 2024 and returns null for this app, so clips are sourced
+// from Deezer (primary) with iTunes as a fallback.
+//
+// NOTE: Apple's iTunes Search API blocks Cloudflare Workers' egress IPs (returns
+// 403/empty), so iTunes is effectively useless from the deployed Worker even
+// though it works from a normal machine — hence Deezer leads. Both are proxied
+// here (no browser CORS) and matched on the primary artist + a cleaned title.
+
+// "Eminem, Rihanna" → "Eminem"; drop featured-artist noise.
+function primaryArtist(artist: string): string {
+  const a = artist.split(/,|;|&| feat\.?| ft\.?| with /i)[0]?.trim();
+  return a || artist.trim();
+}
+// "Stan - Live (Remastered)" → "Stan"; strip parentheticals and dash-suffixes.
+function cleanTitle(name: string): string {
+  const t = name
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\s-\s.*$/, "")
+    .trim();
+  return t || name.trim();
+}
+
+async function deezerPreview(query: string): Promise<string | null> {
+  const url = new URL("https://api.deezer.com/search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "1");
+  try {
+    const r = await fetchRetry(url, { headers: UA });
+    if (!r.ok) return null;
+    const data = (await r.json()) as { data?: { preview?: string }[] };
+    return data.data?.[0]?.preview || null;
+  } catch {
+    return null;
+  }
+}
+
+async function itunesPreview(term: string): Promise<string | null> {
+  const url = new URL("https://itunes.apple.com/search");
+  url.searchParams.set("term", term);
+  url.searchParams.set("entity", "song");
+  url.searchParams.set("limit", "1");
+  try {
+    const r = await fetchRetry(url, { headers: UA });
+    if (!r.ok) return null;
+    const data = (await r.json()) as { results?: { previewUrl?: string }[] };
+    return data.results?.[0]?.previewUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Returns { preview_url, source } — source is for diagnostics only.
+async function lookupPreview(
+  artistRaw: string,
+  trackRaw: string,
+): Promise<{ preview_url: string | null; source: string }> {
+  const artist = primaryArtist(artistRaw);
+  const title = cleanTitle(trackRaw);
+  if (!artist && !title) return { preview_url: null, source: "none" };
+  // Deezer: strict field match first, then a loose query, then iTunes.
+  let p = await deezerPreview(`artist:"${artist}" track:"${title}"`);
+  if (p) return { preview_url: p, source: "deezer-strict" };
+  p = await deezerPreview(`${artist} ${title}`.trim());
+  if (p) return { preview_url: p, source: "deezer-loose" };
+  p = await itunesPreview(`${artist} ${title}`.trim());
+  if (p) return { preview_url: p, source: "itunes" };
+  return { preview_url: null, source: "miss" };
+}
+
 async function reccobeatsFeatures(sid: string): Promise<Record<string, any>> {
   try {
-    const r1 = await fetch(`${RECCOBEATS_API}/track?ids=${sid}`, { headers: UA });
+    const r1 = await fetchRetry(`${RECCOBEATS_API}/track?ids=${sid}`, { headers: UA });
     if (!r1.ok) return {};
     const c1 = ((await r1.json()) as any).content ?? [];
     if (!c1.length) return {};
-    const r2 = await fetch(`${RECCOBEATS_API}/audio-features?ids=${c1[0].id}`, { headers: UA });
+    const r2 = await fetchRetry(`${RECCOBEATS_API}/audio-features?ids=${c1[0].id}`, { headers: UA });
     if (!r2.ok) return {};
     const c2 = ((await r2.json()) as any).content ?? [];
     return c2[0] ?? {};
@@ -329,7 +438,7 @@ function json(obj: unknown, status = 200): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
@@ -339,12 +448,64 @@ export default {
         if (url.pathname === "/api/health") {
           return json({ ready: true, tracks: state.tracks, cold_start: state.hasProjector });
         }
+        if (url.pathname === "/api/config") {
+          // client id is public (not secret) — the browser needs it for the
+          // PKCE playlist-export flow. null hides the playlist button in the UI.
+          return json({ spotify_client_id: env.SPOTIFY_CLIENT_ID ?? null });
+        }
+        if (url.pathname === "/api/preview" && request.method === "GET") {
+          const artist = (url.searchParams.get("artist") ?? "").trim();
+          const track = (url.searchParams.get("track") ?? "").trim();
+          if (!track && !artist) return json({ preview_url: null, source: "none" });
+          // cache key is versioned (v2) so older poisoned `null`s are bypassed.
+          const cache = caches.default;
+          const key = new Request(
+            `https://pf.cache/preview-v2?a=${encodeURIComponent(artist.toLowerCase())}&t=${encodeURIComponent(
+              track.toLowerCase(),
+            )}`,
+          );
+          const hit = await cache.match(key);
+          if (hit) return hit;
+          const found = await lookupPreview(artist, track);
+          // hits never change → cache hard; misses may be a transient upstream
+          // failure → cache briefly so they recover instead of sticking for a day.
+          const ttl = found.preview_url ? 86400 : 600;
+          const res = new Response(JSON.stringify(found), {
+            headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${ttl}`, ...CORS },
+          });
+          ctx.waitUntil(cache.put(key, res.clone()));
+          return res;
+        }
+        if (url.pathname === "/api/sample" && request.method === "GET") {
+          // A random subspace of the corpus for the idle/splash field: a coherent
+          // kNN neighborhood grown from a random seed, projected to 3D. Picked
+          // fresh per request (not cached) so each app load shows a new region.
+          const n = Math.max(1, Math.min(400, parseInt(url.searchParams.get("n") ?? "130", 10) || 130));
+          const seedParam = url.searchParams.get("seed");
+          const seed =
+            seedParam != null && /^\d+$/.test(seedParam)
+              ? parseInt(seedParam, 10)
+              : Math.floor(Math.random() * state.tracks);
+          return json(JSON.parse(sample_field(seed, n)));
+        }
         if (url.pathname === "/api/search" && request.method === "GET") {
-          const q = url.searchParams.get("q") ?? "";
-          if (env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET) {
-            return json(await searchSpotify(env, q));
-          }
-          return json(JSON.parse(corpusSearch(q, 12))); // fallback when no Spotify creds
+          const q = (url.searchParams.get("q") ?? "").trim();
+          if (!q) return json([]);
+          // cache identical queries (prefixes repeat heavily while typing) to
+          // spare Spotify's rate limit.
+          const cache = caches.default;
+          const key = new Request(`https://pf.cache/search?q=${encodeURIComponent(q.toLowerCase())}`);
+          const hit = await cache.match(key);
+          if (hit) return hit;
+          const results =
+            env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET
+              ? await searchSpotify(env, q)
+              : JSON.parse(corpusSearch(q, 12)); // fallback when no Spotify creds
+          const res = new Response(JSON.stringify(results), {
+            headers: { "Content-Type": "application/json", "Cache-Control": "max-age=300", ...CORS },
+          });
+          ctx.waitUntil(cache.put(key, res.clone()));
+          return res;
         }
         if (url.pathname === "/api/route" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));

@@ -16,13 +16,19 @@ use std::cell::RefCell;
 use transit::TransitionModel;
 use wasm_bindgen::prelude::*;
 
-const MAX_EXPANSIONS: usize = 200_000;
+// Capped to fit the Workers Free CPU slice: a search that can't reach the goal
+// within this many expansions returns a clean "no path" (404) instead of being
+// killed mid-search with a 503. (Raise once on a paid plan with a higher cpu_ms.)
+const MAX_EXPANSIONS: usize = 45_000;
 const DEFAULT_LENGTH: usize = 14;
 
 struct State {
     corpus: Corpus,
     transitions: Option<TransitionModel>,
     projector: Option<Projector>,
+    // Baked global 3D layout (t-SNE), flat row-major n*3. When present, every view
+    // (splash sample + route) reads positions from here so they share one space.
+    layout: Option<Vec<f32>>,
 }
 
 thread_local! {
@@ -46,6 +52,7 @@ pub fn load_corpus(corpus_bytes: &[u8], transitions_bytes: &[u8]) -> Result<(), 
             corpus,
             transitions,
             projector: None,
+            layout: None,
         });
     });
     Ok(())
@@ -62,12 +69,46 @@ pub fn set_projector(bytes: &[u8]) -> Result<(), JsValue> {
     Ok(())
 }
 
+// Parse layout.bin ("PFL1": magic, u32 version, u32 n, f32[n*3]) and store it.
+#[wasm_bindgen]
+pub fn set_layout(bytes: &[u8]) -> Result<(), JsValue> {
+    if bytes.len() < 12 || &bytes[0..4] != b"PFL1" {
+        return Err(err("bad layout magic"));
+    }
+    let n = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]) as usize;
+    let want = 12 + n * 3 * 4;
+    if bytes.len() < want {
+        return Err(err("layout truncated"));
+    }
+    let mut xyz = vec![0.0f32; n * 3];
+    for (i, v) in xyz.iter_mut().enumerate() {
+        let o = 12 + i * 4;
+        *v = f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    }
+    STATE.with(|s| {
+        if let Some(st) = s.borrow_mut().as_mut() {
+            if n != st.corpus.n {
+                return Err(err("layout n != corpus n"));
+            }
+            st.layout = Some(xyz);
+        }
+        Ok(())
+    })
+}
+
 fn with_state<R>(f: impl FnOnce(&State) -> Result<R, JsValue>) -> Result<R, JsValue> {
     STATE.with(|s| {
         let b = s.borrow();
         let st = b.as_ref().ok_or_else(|| err("core not initialized"))?;
         f(st)
     })
+}
+
+// Baked layout coordinate for a row, if a layout is loaded.
+fn layout_pos(st: &State, row: usize) -> Option<[f32; 3]> {
+    st.layout
+        .as_ref()
+        .map(|l| [l[row * 3], l[row * 3 + 1], l[row * 3 + 2]])
 }
 
 #[wasm_bindgen]
@@ -79,6 +120,7 @@ pub fn info() -> Result<String, JsValue> {
             "k": st.corpus.k,
             "has_transitions": st.transitions.is_some(),
             "has_projector": st.projector.is_some(),
+            "has_layout": st.layout.is_some(),
             "text_model": st.projector.as_ref().map(|p| p.text_model()),
         })
         .to_string())
@@ -179,6 +221,77 @@ pub fn snap(v: &[f32]) -> Result<usize, JsValue> {
     with_state(|st| Ok(st.corpus.snap(v)))
 }
 
+/// Sample a coherent *subspace* of the corpus for the idle/splash field: start
+/// from `seed_row` (the caller picks it at random for variety per app load) and
+/// grow outward over the kNN graph until `count` tracks are gathered — a local
+/// neighborhood where similar genres/styles cluster — then PCA-project the whole
+/// set to 3D. Returns the same node shape as the route cloud so the UI can treat
+/// the dots as real, inspectable tracks.
+#[wasm_bindgen]
+pub fn sample_field(seed_row: usize, count: usize) -> Result<String, JsValue> {
+    with_state(|st| {
+        let c = &st.corpus;
+        if c.n == 0 {
+            return Ok("[]".to_string());
+        }
+        let seed = seed_row % c.n;
+        let count = count.clamp(1, 400).min(c.n);
+
+        // BFS over the kNN graph from the seed → a connected slice of the manifold.
+        let mut order: Vec<usize> = Vec::with_capacity(count);
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+        seen.insert(seed);
+        queue.push_back(seed);
+        order.push(seed);
+        while let Some(cur) = queue.pop_front() {
+            if order.len() >= count {
+                break;
+            }
+            for (nbr, _) in c.neighbors(cur) {
+                if order.len() >= count {
+                    break;
+                }
+                if seen.insert(nbr) {
+                    order.push(nbr);
+                    queue.push_back(nbr);
+                }
+            }
+        }
+
+        // Positions come from the shared baked layout when present; otherwise a
+        // local PCA of just this neighborhood (legacy / no-layout fallback).
+        let pos: Vec<[f32; 3]> = if st.layout.is_some() {
+            order.iter().map(|&r| layout_pos(st, r).unwrap()).collect()
+        } else {
+            let vectors: Vec<&[f32]> = order.iter().map(|&r| c.vec_at(r)).collect();
+            pca::project3d(&vectors, c.dim)
+        };
+
+        let out: Vec<Value> = order
+            .iter()
+            .enumerate()
+            .map(|(i, &row)| {
+                let m = &c.meta[row];
+                let p = pos[i];
+                json!({
+                    "id": c.ids[row].to_string(),
+                    "uri": m.uri,
+                    "name": m.name,
+                    "artist": m.artist,
+                    "album": m.album,
+                    "genre": m.genre,
+                    "spotify_url": spotify_url(&m.uri),
+                    "fit": c.fit[row] as f64,
+                    "position": [p[0], p[1], p[2]],
+                    "kind": "sample",
+                })
+            })
+            .collect();
+        Ok(Value::Array(out).to_string())
+    })
+}
+
 /// Cold-start: project an arbitrary track's features into the corpus latent
 /// space and snap to the nearest anchor. `meta_json` carries the raw Spotify +
 /// ReccoBeats fields; `text_emb` is the bge embedding from the Worker AI binding.
@@ -201,7 +314,6 @@ pub fn project_and_snap(text_emb: &[f32], meta_json: &str) -> Result<String, JsV
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 #[wasm_bindgen]
 pub fn route(
     start_row: usize,
@@ -257,17 +369,33 @@ pub fn route(
             }
         }
 
-        // PCA over path + cloud + the two requested vectors
-        let mut vectors: Vec<&[f32]> = Vec::with_capacity(path.len() + cloud.len() + 2);
-        for &pid in &path {
-            vectors.push(c.vec_at(pid));
-        }
-        for &pid in &cloud {
-            vectors.push(c.vec_at(pid));
-        }
-        vectors.push(start_vec);
-        vectors.push(end_vec);
-        let pos = pca::project3d(&vectors, c.dim);
+        // Positions in [path..., cloud..., start, end] order. With a baked layout
+        // they come from the shared global space (so the route sits where its
+        // tracks actually live, alongside the splash); otherwise a local PCA.
+        let pos: Vec<[f32; 3]> = if st.layout.is_some() {
+            let mut v = Vec::with_capacity(path.len() + cloud.len() + 2);
+            for &pid in &path {
+                v.push(layout_pos(st, pid).unwrap());
+            }
+            for &pid in &cloud {
+                v.push(layout_pos(st, pid).unwrap());
+            }
+            // requested endpoints sit at their snapped/exact anchor's layout coord
+            v.push(layout_pos(st, start_row).unwrap());
+            v.push(layout_pos(st, end_row).unwrap());
+            v
+        } else {
+            let mut vectors: Vec<&[f32]> = Vec::with_capacity(path.len() + cloud.len() + 2);
+            for &pid in &path {
+                vectors.push(c.vec_at(pid));
+            }
+            for &pid in &cloud {
+                vectors.push(c.vec_at(pid));
+            }
+            vectors.push(start_vec);
+            vectors.push(end_vec);
+            pca::project3d(&vectors, c.dim)
+        };
 
         let node = |row: usize, idx: usize| -> Value {
             let m = &c.meta[row];
@@ -286,11 +414,52 @@ pub fn route(
             })
         };
 
-        let path_json: Vec<Value> = path.iter().enumerate().map(|(i, &r)| node(r, i)).collect();
+        // Per-hop justification: the interpretable cost terms behind why path[i]
+        // follows path[i-1] (the same signals A* weighs in pathfind.rs).
+        let why_for = |i: usize| -> Value {
+            if i == 0 {
+                return Value::Null;
+            }
+            let a = path[i - 1];
+            let b = path[i];
+            let transition = model
+                .map(|m| Value::from(m.affinity(&c.meta[a], &c.meta[b])))
+                .unwrap_or(Value::Null);
+            let context = match (model, ctx.as_ref()) {
+                (Some(m), Some(cx)) => Value::from(m.context_fit(&c.meta[b], cx)),
+                _ => Value::Null,
+            };
+            json!({
+                "dist": c.cos_dist(a, b),
+                "fit": c.fit[b] as f64,
+                "genre_jump": c.meta[a].genre != c.meta[b].genre,
+                "prev_genre": c.meta[a].genre,
+                "transition": transition,
+                "context": context,
+            })
+        };
+
+        let path_json: Vec<Value> = path
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| {
+                let mut v = node(r, i);
+                if let Value::Object(ref mut map) = v {
+                    map.insert("why".into(), why_for(i));
+                }
+                v
+            })
+            .collect();
         let cloud_json: Vec<Value> = cloud
             .iter()
             .enumerate()
-            .map(|(i, &r)| node(r, path.len() + i))
+            .map(|(i, &r)| {
+                let mut v = node(r, path.len() + i);
+                if let Value::Object(ref mut map) = v {
+                    map.insert("kind".into(), Value::from("cloud"));
+                }
+                v
+            })
             .collect();
         let edges: Vec<Value> = path
             .windows(2)
