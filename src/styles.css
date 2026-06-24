@@ -98,16 +98,14 @@ input {
 }
 
 /* ---------------- atlas plate frame ---------------- */
-/* the whole viewport is an engraved cartographic plate: a ruled graticule
-   with edge ticks, a serif wordmark + printed caption in the margins, and
-   axis labels. Decorative only; sits above the canvas, below the chrome. */
+/* an engraved cartographic border: a ruled rectangle with perpendicular edge
+   ticks, framing the 3-D map. Decorative only; above the canvas, below chrome. */
 .plate {
   position: absolute;
   inset: 0;
   z-index: 3;
   pointer-events: none;
 }
-/* ruled border + perpendicular tick marks along all four edges */
 .plateRule {
   position: absolute;
   inset: 20px;
@@ -124,81 +122,6 @@ input {
     repeating-linear-gradient(to bottom, var(--rule-2) 0 1px, transparent 1px 46px);
   background-position: top left, bottom left, top left, top right;
   background-size: 100% 7px, 100% 7px, 7px 100%, 7px 100%;
-}
-/* margin text — only shown at desktop width, where the margins have room */
-.plateTitle,
-.plateCaption,
-.plateAxis {
-  display: none;
-}
-.plateTitle {
-  position: absolute;
-  top: 30px;
-  left: 36px;
-  align-items: baseline;
-  gap: 9px;
-  color: var(--plate-ink);
-}
-.plateMark {
-  color: var(--signal);
-  font-size: 12px;
-}
-.plateName {
-  font-family: var(--serif);
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-.plateTag {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 13.5px;
-  color: var(--plate-ink-2);
-}
-.plateCaption {
-  position: absolute;
-  top: 88px;
-  left: 50%;
-  transform: translateX(-50%);
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  max-width: min(640px, 62vw);
-  text-align: center;
-}
-.plateNo {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.24em;
-  color: var(--signal);
-}
-.plateCapTitle {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 15px;
-  line-height: 1.25;
-  color: var(--plate-ink);
-}
-.plateCapSub {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.03em;
-  color: var(--plate-ink-2);
-}
-.plateAxis {
-  position: absolute;
-  bottom: 25px;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: var(--plate-ink-2);
-}
-.plateAxisX {
-  left: 40px;
-}
-.plateAxisY {
-  right: 40px;
 }
 
 /* ---------------- top bar ---------------- */
@@ -595,18 +518,6 @@ input {
   text-align: center;
   pointer-events: none;
   animation: rise 0.7s var(--ease) both;
-}
-.introPlate {
-  display: inline-block;
-  margin-bottom: 14px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--rule-2);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.26em;
-  text-transform: uppercase;
-  color: var(--signal);
 }
 .intro h1 {
   margin: 0 0 16px;

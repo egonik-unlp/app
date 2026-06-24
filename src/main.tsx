@@ -987,54 +987,6 @@ function makeDemoRoute(): RouteResponse {
 }
 
 // ===========================================================================
-// Atlas plate frame
-// ===========================================================================
-// Reframes the whole viewport as an engraved cartographic plate: a ruled
-// graticule with edge ticks and axis labels, a serif wordmark in the top
-// margin, and a printed caption naming the current plate. A decorative overlay
-// (pointer-events: none) layered above the 3-D canvas, beneath the controls.
-function PlateFrame({
-  mode,
-  route,
-  embed,
-}: {
-  mode: "route" | "explore" | "playlist";
-  route: RouteResponse | null;
-  embed: EmbedResponse | null;
-}) {
-  let plate = "PLATE I";
-  let title = "A survey of listening taste";
-  let sub = "cosine-distance projection · three principal axes";
-  if (route) {
-    const a = route.path[0]?.name ?? "origin";
-    const b = route.path[route.path.length - 1]?.name ?? "destination";
-    plate = "PLATE II";
-    title = `The route from ${a} to ${b}`;
-    sub = `${route.path.length} stops${
-      route.context ? ` · ${route.context}` : ""
-    } · charted by A*`;
-  } else if (embed) {
-    plate = "PLATE III";
-    title = `The neighbourhood of ${embed.track.name}`;
-    sub = `${embed.cloud.length} nearest tracks · ${embed.track.artist}`;
-  } else if (mode === "explore") {
-    title = "The neighbourhood of one track";
-    sub = "choose a song to chart its surroundings";
-  }
-
-  return (
-    <div className="plate" aria-hidden>
-      <div className="plateRule" />
-      <div className="plateCaption">
-        <span className="plateNo">{plate}</span>
-        <span className="plateCapTitle">{title}</span>
-        <span className="plateCapSub">{sub}</span>
-      </div>
-    </div>
-  );
-}
-
-// ===========================================================================
 // App
 // ===========================================================================
 function App() {
@@ -1329,7 +1281,10 @@ function App() {
         playingId={playback.playingId}
       />
 
-      <PlateFrame mode={mode} route={route} embed={embed} />
+      {/* engraved plate border framing the map (decorative) */}
+      <div className="plate" aria-hidden>
+        <div className="plateRule" />
+      </div>
 
       <header className={`topbar${composerOpen ? " open" : ""}`}>
         <div className="brand">
@@ -1841,13 +1796,8 @@ function Intro({
   if (mode === "explore") {
     return (
       <div className="intro">
-        <span className="introPlate">Plate I · an atlas of listening taste</span>
         <h1>Where one song sits</h1>
-        <p>
-          {compact
-            ? "Pick a song and see it placed among its nearest neighbours, colored by genre."
-            : "Every track this engine knows lives somewhere on a map of listening taste. Pick a song and see it placed among its nearest neighbours — the tracks that sit closest to it in that space, colored by genre."}
-        </p>
+        <p>See any track among its nearest neighbours on the map of taste.</p>
         <p className="cue">
           {ready
             ? "Press Explore to begin."
@@ -1860,19 +1810,14 @@ function Intro({
   }
   return (
     <div className="intro">
-      <span className="introPlate">Plate I · an atlas of listening taste</span>
       <h1>The space between two songs</h1>
-      <p>
-        {compact
-          ? "Pick a start and a destination, then watch the route thread across the map of listening taste."
-          : "Every track this engine knows lives somewhere on a map of listening taste. Pick a start and a destination and watch the route thread through the cloud — staying close on the map, leaning toward songs you’d actually play, and easing between genres rather than lurching."}
-      </p>
+      <p>Pick two tracks and watch the route thread the map of taste.</p>
       <p className="cue">
         {ready
           ? "Press Trace route to begin."
           : compact
             ? "Tap the bar above to choose two songs."
-            : "Choose a From and a To above to begin."}
+            : "Choose a From and a To above."}
       </p>
     </div>
   );
