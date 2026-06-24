@@ -288,8 +288,12 @@ input {
   cursor: pointer;
   transition: color 0.12s, background 0.12s, box-shadow 0.12s;
 }
-.modeSwitch button:hover {
+.modeSwitch button:hover:not(:disabled) {
   color: var(--ink);
+}
+.modeSwitch button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 .modeSwitch button.on {
   color: var(--ink);
@@ -809,6 +813,111 @@ input {
   background: rgba(198, 255, 77, 0.12);
 }
 
+/* ---------------- envelope (gather nearby tracks) ---------------- */
+.reach {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+.reachLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.reachLabel svg {
+  color: var(--cool);
+}
+/* fog slider — a continuous reveal radius, cyan fill to the thumb */
+.reachSlider {
+  flex: 1;
+  min-width: 130px;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.reachSlider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--cool) var(--pct, 0%),
+    var(--line-2) var(--pct, 0%)
+  );
+}
+.reachSlider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line-2);
+}
+.reachSlider::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cool);
+}
+.reachSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: #eaffff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cool) 60%, transparent),
+    0 0 12px color-mix(in srgb, var(--cool) 70%, transparent);
+}
+.reachSlider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #eaffff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cool) 60%, transparent),
+    0 0 12px color-mix(in srgb, var(--cool) 70%, transparent);
+}
+.reachSlider:focus-visible {
+  outline: none;
+}
+.reachSlider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--cool),
+    0 0 14px color-mix(in srgb, var(--cool) 70%, transparent);
+}
+.reachSlider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--cool);
+}
+.reachReadout {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.reachReadout b {
+  color: var(--cool);
+  font-weight: 700;
+}
+@media (max-width: 760px) {
+  .reach {
+    gap: 10px 12px;
+  }
+  .reachSlider {
+    height: 34px;
+  }
+  .reachReadout {
+    width: 100%;
+    order: 3;
+  }
+}
+
 /* ---------------- explore-mode panel ---------------- */
 .embedTrack {
   display: flex;
@@ -1032,6 +1141,16 @@ input {
   border: 2px solid var(--cool);
   background: transparent;
   border-radius: 50%;
+}
+.sw.envelope {
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--cool) 0 20%,
+    transparent 24% 46%,
+    color-mix(in srgb, var(--cool) 55%, transparent) 50% 66%,
+    transparent 70%
+  );
 }
 /* warp-ribbon legend swatches */
 .sw.ribbon {
@@ -1650,5 +1769,310 @@ input {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ===================== Space C — the composer ===================== */
+.compose {
+  position: absolute;
+  top: 84px;
+  right: 16px;
+  bottom: 16px;
+  width: clamp(360px, 40vw, 480px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--bezel), var(--shadow);
+  backdrop-filter: blur(20px);
+  overflow: hidden;
+  animation: rise 0.42s var(--ease) both;
+}
+.composeTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.composeTitle {
+  flex: 1;
+  min-width: 0;
+}
+.composeKicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cool);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.composeTitle h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0 3px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.composeTitle h2 svg {
+  flex: none;
+  color: var(--ink-3);
+}
+.composeMeta {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.composeMeta b {
+  color: var(--ink);
+}
+.composeActions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.action.build {
+  color: var(--signal);
+  border-color: rgba(255, 61, 129, 0.45);
+  background: rgba(255, 61, 129, 0.14);
+}
+.action.build:hover:not(:disabled) {
+  background: rgba(255, 61, 129, 0.2);
+  border-color: rgba(255, 61, 129, 0.6);
+}
+
+.composeFog {
+  padding: 12px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.composeFog .reach {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.composeFogHint {
+  margin-top: 9px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.composeFogHint b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.composeList {
+  flex: 1;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.crow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+}
+.crow.nearby {
+  margin-left: 20px;
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.015);
+}
+.crow.out {
+  opacity: 0.42;
+}
+.crow.dragging {
+  border-color: var(--cool);
+  background: color-mix(in srgb, var(--cool) 13%, transparent);
+}
+.crow.sounding {
+  border-color: var(--g);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--g) 50%, transparent);
+}
+.grip {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 30px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  cursor: grab;
+  touch-action: none;
+}
+.grip:active {
+  cursor: grabbing;
+}
+.grip:focus-visible {
+  outline: 2px solid var(--cool);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.crowIdx {
+  flex: none;
+  width: 17px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+/* genre status dot (not a control) — stops wear the signal hue */
+.crowDot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--g);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--g) 60%, transparent);
+}
+.crowDot.spine {
+  width: 11px;
+  height: 11px;
+  background: var(--signal);
+  box-shadow: 0 0 10px rgba(255, 61, 129, 0.6);
+}
+.crowName {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.crowName b {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crowName small {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.crowName:hover b {
+  color: var(--cool);
+}
+.crowBadge {
+  flex: none;
+  font-size: 10px;
+  color: var(--cool);
+}
+.crowPlay,
+.crowKeep {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.crowPlay:hover,
+.crowKeep:hover {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+.crowPlay.on {
+  color: var(--signal);
+  border-color: rgba(255, 61, 129, 0.4);
+  background: rgba(255, 61, 129, 0.12);
+}
+.crow.out .crowKeep {
+  color: var(--lime);
+  border-color: rgba(198, 255, 77, 0.4);
+}
+.composeEmpty {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.composeEmpty svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--cool);
+}
+
+/* the playlist-mode header strip (top bar) */
+.composeHint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.composeHintRoute {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.trace.ghost {
+  border-color: var(--line-2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  box-shadow: none;
+}
+.trace.ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 760px) {
+  .compose {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 64vh;
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .crow.nearby {
+    margin-left: 12px;
+  }
+  .crowInfo,
+  .crowKeep {
+    width: 34px;
+    height: 34px;
+  }
+  .crowAdd {
+    height: 32px;
+  }
+  .composeHint {
+    width: 100%;
   }
 }

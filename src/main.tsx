@@ -7,6 +7,7 @@ import {
   Check,
   Compass,
   ExternalLink,
+  GripVertical,
   Layers,
   Link2,
   ListMusic,
@@ -15,10 +16,13 @@ import {
   Orbit,
   Pause,
   Play,
+  Plus,
+  RotateCcw,
   Route as RouteIcon,
   Search,
   Shuffle,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import * as THREE from "three";
@@ -372,6 +376,171 @@ const easeInOutCubic = (t: number) =>
 
 const SIGNAL = "#ff3d81"; // the journey — hot magenta
 const COOL = "#21e6ff"; // snap / cold-start links — electric cyan
+
+// ---------------------------------------------------------------------------
+// The envelope — gather nearby tracks around the route.
+// Every route comes back with a `cloud` of neighborhood tracks (the nearest
+// neighbors of each stop). A "reach" control lets a listener widen an envelope
+// outward from the path, pulling those tracks into the saved playlist shell by
+// shell — closest first, then further and further out. The journey stays the
+// spine; the neighborhood wraps around it.
+// ---------------------------------------------------------------------------
+
+// Each cloud track, ranked by its distance to the nearest route stop, closest
+// first. Distances use the raw layout positions — the same space the 3-D map is
+// built from — so the rings a listener widens on screen are exactly the tracks
+// that get saved.
+type ReachStop = { node: TrackNode; pathIndex: number; dist: number };
+
+function analyzeCloud(route: RouteResponse): ReachStop[] {
+  const pts = route.path.map((n) => new THREE.Vector3(...n.position));
+  if (!pts.length) return [];
+  const ranked = route.cloud.map((node) => {
+    const cp = new THREE.Vector3(...node.position);
+    let pathIndex = 0;
+    let bestD = Infinity;
+    pts.forEach((p, i) => {
+      const d = cp.distanceToSquared(p);
+      if (d < bestD) {
+        bestD = d;
+        pathIndex = i;
+      }
+    });
+    return { node, pathIndex, dist: Math.sqrt(bestD) };
+  });
+  ranked.sort((a, b) => a.dist - b.dist);
+  return ranked;
+}
+
+// `reach` is a continuous fog radius in [0,1]: the fraction of the
+// distance-sorted neighborhood revealed around the path. 0 = route alone,
+// 1 = the whole gathered neighborhood. Count = round(total * reach).
+const revealedCountOf = (total: number, reach: number) =>
+  Math.round(total * Math.max(0, Math.min(1, reach)));
+
+// ---------------------------------------------------------------------------
+// Space C — the composer. A route hands over its stops and a neighborhood of
+// nearby candidates; the composer turns that into an explicit, editable playlist.
+// `reach` (0–1) is the fog radius — how far out the neighborhood is revealed —
+// and the overlays below capture the listener's edits on top of it.
+// ---------------------------------------------------------------------------
+type CurationRow = {
+  key: string; // stable per track (its id)
+  node: TrackNode;
+  kind: "stop" | "nearby";
+  stopIndex: number; // the stop it is, or the stop it was gathered around
+  included: boolean; // rides along on save; excluded rows stay visible, dimmed
+};
+
+type Curation = {
+  excluded: Set<string>; // rows toggled off
+  extra: Set<string>; // nearby revealed by hand, beyond the reach radius
+  order: string[] | null; // explicit drag order; null = woven default
+};
+
+const emptyCuration = (): Curation => ({
+  excluded: new Set(),
+  extra: new Set(),
+  order: null,
+});
+
+// The neighborhood the current reach reveals from the fog (closest first). These
+// become the clickable bodies in the galaxy; gathering one is a separate, explicit
+// act (it joins `extra`), so reach reveals candidates rather than auto-adding them.
+function revealedNearbyIds(reachCloud: ReachStop[], reach: number): Set<string> {
+  const ids = new Set<string>();
+  for (const r of reachCloud.slice(0, revealedCountOf(reachCloud.length, reach)))
+    ids.add(r.node.id);
+  return ids;
+}
+
+// Re-seat an explicit drag order against the current row set: keep the dragged
+// order for rows that still exist, then splice any newly revealed rows in beside
+// their stop so widening the fog doesn't scatter hand-picked tracks to the end.
+function reconcileOrder(order: string[], base: CurationRow[]): CurationRow[] {
+  const byKey = new Map(base.map((r) => [r.key, r]));
+  const placed = new Set<string>();
+  const out: CurationRow[] = [];
+  for (const k of order) {
+    const r = byKey.get(k);
+    if (r && !placed.has(k)) {
+      out.push(r);
+      placed.add(k);
+    }
+  }
+  for (const r of base) {
+    if (placed.has(r.key)) continue;
+    if (r.kind === "stop") {
+      let idx = out.findIndex(
+        (o) => o.kind === "stop" && o.stopIndex > r.stopIndex,
+      );
+      if (idx < 0) idx = out.length;
+      out.splice(idx, 0, r);
+    } else {
+      let idx = -1;
+      for (let i = 0; i < out.length; i += 1)
+        if (out[i].stopIndex === r.stopIndex) idx = i;
+      if (idx < 0) out.push(r);
+      else out.splice(idx + 1, 0, r);
+    }
+    placed.add(r.key);
+  }
+  return out;
+}
+
+// The playlist rows: the route's stops plus the nearby tracks gathered by hand
+// (curation.extra), each woven in after the stop it sits closest to. Reach no
+// longer adds rows — it only reveals candidates in the galaxy; gathering is the
+// explicit click. Stops can be dropped (excluded) but stay as restorable rows.
+function buildCuration(
+  route: RouteResponse,
+  reachCloud: ReachStop[],
+  _reach: number,
+  cur: Curation,
+): CurationRow[] {
+  const gathered = reachCloud.filter((r) => cur.extra.has(r.node.id));
+  const byStop = new Map<number, ReachStop[]>();
+  for (const r of gathered) {
+    const arr = byStop.get(r.pathIndex);
+    if (arr) arr.push(r);
+    else byStop.set(r.pathIndex, [r]);
+  }
+  const base: CurationRow[] = [];
+  route.path.forEach((n, i) => {
+    base.push({
+      key: n.id,
+      node: n,
+      kind: "stop",
+      stopIndex: i,
+      included: !cur.excluded.has(n.id),
+    });
+    for (const r of (byStop.get(i) ?? []).sort((a, b) => a.dist - b.dist))
+      base.push({
+        key: r.node.id,
+        node: r.node,
+        kind: "nearby",
+        stopIndex: i,
+        included: true,
+      });
+  });
+  return cur.order ? reconcileOrder(cur.order, base) : base;
+}
+
+// Final Spotify uri list: the included rows in order, with the listener's actual
+// picks (which may have been snapped) bookending it. De-duped, real tracks only.
+function curationToUris(route: RouteResponse, rows: CurationRow[]): string[] {
+  const uris: string[] = [];
+  const included = rows.filter((r) => r.included).map((r) => r.node.uri);
+  const startUri = route.requested_start.uri;
+  if (startUri && startUri !== included[0]) uris.push(startUri);
+  uris.push(...included);
+  const endUri = route.requested_end.uri;
+  if (endUri && endUri !== included[included.length - 1]) uris.push(endUri);
+  const seen = new Set<string>();
+  return uris.filter(
+    (u) => /^spotify:track:/.test(u) && !seen.has(u) && (seen.add(u), true),
+  );
+}
 
 // 0.05s of silence — played inside the first user gesture to unlock the audio
 // element so later programmatic play() calls (after an awaited preview fetch)
@@ -829,7 +998,7 @@ function PlateFrame({
   route,
   embed,
 }: {
-  mode: "route" | "explore";
+  mode: "route" | "explore" | "playlist";
   route: RouteResponse | null;
   embed: EmbedResponse | null;
 }) {
@@ -882,7 +1051,7 @@ function App() {
 
   // two modes: trace a route between two songs, or explore one song's
   // neighborhood in the shared embedding space.
-  const [mode, setMode] = useState<"route" | "explore">("route");
+  const [mode, setMode] = useState<"route" | "explore" | "playlist">("route");
   const [solo, setSolo] = useState<Candidate | null>(null);
   const [embed, setEmbed] = useState<EmbedResponse | null>(null);
   const [embedding, setEmbedding] = useState(false);
@@ -913,6 +1082,11 @@ function App() {
   const [focus, setFocus] = useState<number | null>(null);
   const [inspect, setInspect] = useState<TrackNode | null>(null);
   const [warp, setWarp] = useState(true);
+  // Envelope reach: 0 = the route alone, 1–3 widen the fog-of-war radius that
+  // reveals nearby tracks around the path. Lives in the composer (Space C).
+  const [reach, setReach] = useState(0);
+  // Composer edits layered on top of the route + reach (Space C).
+  const [curation, setCuration] = useState<Curation>(emptyCuration);
   const auth = useSpotifyAuth();
   const playback = usePlayback(route, setFocus, setError);
 
@@ -920,6 +1094,49 @@ function App() {
   useEffect(() => {
     if (route) sessionStorage.setItem(ROUTE_KEY, JSON.stringify(route));
   }, [route]);
+
+  // A fresh route starts with the fog closed and no composer edits.
+  useEffect(() => {
+    setReach(0);
+    setCuration(emptyCuration());
+  }, [route]);
+
+  // Rank the neighborhood once per route; everything in the composer derives
+  // from it. Shared by the reel, the composer list, and the save.
+  const reachCloud = useMemo(
+    () => (route ? analyzeCloud(route) : []),
+    [route],
+  );
+  const curationRows = useMemo(
+    () => (route ? buildCuration(route, reachCloud, reach, curation) : []),
+    [route, reachCloud, reach, curation],
+  );
+  // Nearby tracks the composer currently keeps — also lights them on the route
+  // map, so the two spaces stay in agreement.
+  const includedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of curationRows)
+      if (r.kind === "nearby" && r.included) ids.add(r.node.id);
+    return ids;
+  }, [curationRows]);
+
+  const enterPlaylist = () => {
+    if (route) setMode("playlist");
+  };
+  // Leaving the composer returns to the route map it was built from.
+  const backToMap = () => setMode("route");
+
+  // The single curation gesture, shared by the galaxy (click a star) and the
+  // composer list (remove/restore). Stops toggle their excluded flag and stay as
+  // rows; nearby tracks toggle membership in the gathered set.
+  const toggleTrack = (key: string, kind: "stop" | "nearby") =>
+    setCuration((c) => {
+      const set = new Set(kind === "stop" ? c.excluded : c.extra);
+      set.has(key) ? set.delete(key) : set.add(key);
+      return kind === "stop"
+        ? { ...c, excluded: set }
+        : { ...c, extra: set };
+    });
 
   // Escape closes the mobile composer sheet
   useEffect(() => {
@@ -1079,15 +1296,19 @@ function App() {
 
   // one-line summary of the current pick, shown on the mobile composer trigger
   const composerSummary =
-    mode === "route"
-      ? start && end
-        ? `${start.name} → ${end.name}`
-        : start
-          ? `${start.name} → choose a destination`
-          : "Trace a journey between two songs"
-      : solo
-        ? solo.name
-        : "Explore one song’s neighbourhood";
+    mode === "playlist"
+      ? route
+        ? `Composing · ${route.requested_start.name} → ${route.requested_end.name}`
+        : "Composing a playlist"
+      : mode === "route"
+        ? start && end
+          ? `${start.name} → ${end.name}`
+          : start
+            ? `${start.name} → choose a destination`
+            : "Trace a journey between two songs"
+        : solo
+          ? solo.name
+          : "Explore one song’s neighbourhood";
 
   return (
     <main className="app">
@@ -1099,6 +1320,13 @@ function App() {
         onFocus={setFocus}
         onInspect={setInspect}
         warp={warp}
+        includedIds={includedIds}
+        mode={mode}
+        reachCloud={reachCloud}
+        reach={reach}
+        curation={curation}
+        onToggle={toggleTrack}
+        playingId={playback.playingId}
       />
 
       <PlateFrame mode={mode} route={route} embed={embed} />
@@ -1141,24 +1369,28 @@ function App() {
             </button>
           </div>
 
-          <div className="modeSwitch" role="tablist" aria-label="Mode">
-            <button
-              role="tab"
-              className={mode === "route" ? "on" : ""}
-              aria-selected={mode === "route"}
-              onClick={() => setMode("route")}
-            >
-              <RouteIcon size={14} aria-hidden /> <span>Route</span>
-            </button>
-            <button
-              role="tab"
-              className={mode === "explore" ? "on" : ""}
-              aria-selected={mode === "explore"}
-              onClick={() => setMode("explore")}
-            >
-              <Orbit size={14} aria-hidden /> <span>Explore</span>
-            </button>
-          </div>
+          {/* Playlist isn't a top-level mode — it's composed from a route, so it
+              has no tab here; you enter it from the route's "Build playlist". */}
+          {mode !== "playlist" && (
+            <div className="modeSwitch" role="tablist" aria-label="Mode">
+              <button
+                role="tab"
+                className={mode === "route" ? "on" : ""}
+                aria-selected={mode === "route"}
+                onClick={() => setMode("route")}
+              >
+                <RouteIcon size={14} aria-hidden /> <span>Route</span>
+              </button>
+              <button
+                role="tab"
+                className={mode === "explore" ? "on" : ""}
+                aria-selected={mode === "explore"}
+                onClick={() => setMode("explore")}
+              >
+                <Orbit size={14} aria-hidden /> <span>Explore</span>
+              </button>
+            </div>
+          )}
           {mode === "route" ? (
             <>
               <TrackPicker label="From" selected={start} onSelect={setStart} />
@@ -1198,7 +1430,7 @@ function App() {
                 <span>{status === "routing" ? "Tracing" : "Trace route"}</span>
               </button>
             </>
-          ) : (
+          ) : mode === "explore" ? (
             <>
               <TrackPicker label="Track" selected={solo} onSelect={setSolo} />
               <button
@@ -1214,6 +1446,24 @@ function App() {
                 <span>{embedding ? "Scanning" : "Explore"}</span>
               </button>
             </>
+          ) : (
+            <div className="composeHint">
+              <span className="composeHintRoute">
+                {route ? (
+                  <>
+                    {route.requested_start.name}
+                    <ArrowRight size={13} aria-hidden />
+                    {route.requested_end.name}
+                  </>
+                ) : (
+                  "Composing"
+                )}
+              </span>
+              <button className="trace ghost" onClick={backToMap}>
+                <RouteIcon size={16} aria-hidden />
+                <span>Back to map</span>
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -1246,16 +1496,13 @@ function App() {
         </div>
       )}
 
-      {route && (
+      {route && mode !== "playlist" && (
         <JourneyStrip
           route={route}
           focus={focus}
           onFocus={setFocus}
           onInspect={setInspect}
           snapped={!!snapped}
-          token={auth.token}
-          canSave={!!auth.clientId}
-          onLogin={auth.login}
           onError={setError}
           playing={playback.playing}
           paused={playback.paused}
@@ -1264,6 +1511,27 @@ function App() {
           shareUrl={shareUrl}
           warp={warp}
           onWarp={setWarp}
+          onBuildPlaylist={enterPlaylist}
+        />
+      )}
+
+      {route && mode === "playlist" && (
+        <ComposePanel
+          route={route}
+          rows={curationRows}
+          reach={reach}
+          onReach={setReach}
+          reachCloud={reachCloud}
+          onCuration={setCuration}
+          onToggle={toggleTrack}
+          onInspect={setInspect}
+          onBack={backToMap}
+          token={auth.token}
+          canSave={!!auth.clientId}
+          onLogin={auth.login}
+          onError={setError}
+          playingId={playback.playingId}
+          onAudition={playback.toggleTrack}
         />
       )}
 
@@ -1277,7 +1545,7 @@ function App() {
         />
       )}
 
-      {(route || embed) && <Legend />}
+      {(route || embed) && mode !== "playlist" && <Legend />}
 
       {inspect && (
         <Inspector
@@ -1566,7 +1834,7 @@ function Intro({
   ready,
   compact,
 }: {
-  mode: "route" | "explore";
+  mode: "route" | "explore" | "playlist";
   ready: boolean;
   compact: boolean;
 }) {
@@ -1740,6 +2008,16 @@ function Legend() {
           </div>
           <div>
             <dt>
+              <span className="sw envelope" /> Nearby
+            </dt>
+            <dd>
+              Widen the envelope under the route to gather neighboring tracks —
+              closest first, then further out. Gathered dots brighten and tether
+              to the route, and ride along when you save the playlist.
+            </dd>
+          </div>
+          <div>
+            <dt>
               <span className="sw ring" /> From / To
             </dt>
             <dd>
@@ -1790,15 +2068,59 @@ function WarpToggle({
   );
 }
 
+// Fog control: a continuous slider that clears the neighborhood fog outward from
+// the path — closest candidates first, then further and further. Fine-grained
+// (every notch reveals a few more bodies) rather than a handful of fixed shells.
+function ReachControl({
+  reach,
+  onChange,
+  total,
+  revealed,
+}: {
+  reach: number;
+  onChange: (reach: number) => void;
+  total: number;
+  revealed: number;
+}) {
+  const pct = Math.round(Math.max(0, Math.min(1, reach)) * 100);
+  return (
+    <div className="reach">
+      <span className="reachLabel">
+        <Orbit size={13} aria-hidden /> Fog
+      </span>
+      <input
+        className="reachSlider"
+        type="range"
+        min={0}
+        max={1}
+        step={0.02}
+        value={reach}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Reveal radius — how far out to clear the fog and reveal nearby tracks"
+        aria-valuetext={
+          revealed === 0 ? "fog closed" : `${revealed} of ${total} nearby revealed`
+        }
+        style={{ "--pct": `${pct}%` } as React.CSSProperties}
+      />
+      <span className="reachReadout" aria-live="polite">
+        {revealed === 0 ? (
+          "Fog closed"
+        ) : (
+          <>
+            <b>{revealed}</b> of {total} revealed
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function JourneyStrip({
   route,
   focus,
   onFocus,
   onInspect,
   snapped,
-  token,
-  canSave,
-  onLogin,
   onError,
   playing,
   paused,
@@ -1807,15 +2129,13 @@ function JourneyStrip({
   shareUrl,
   warp,
   onWarp,
+  onBuildPlaylist,
 }: {
   route: RouteResponse;
   focus: number | null;
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
   snapped: boolean;
-  token: string | null;
-  canSave: boolean;
-  onLogin: () => void;
   onError: (msg: string | null) => void;
   playing: boolean;
   paused: boolean;
@@ -1824,6 +2144,7 @@ function JourneyStrip({
   shareUrl: string | null;
   warp: boolean;
   onWarp: (v: boolean) => void;
+  onBuildPlaylist: () => void;
 }) {
   // Playback lives in App's usePlayback hook (shared with the Inspector); this
   // component just renders its controls via the playing/paused/playingId props.
@@ -1840,60 +2161,6 @@ function JourneyStrip({
       onError(`Couldn’t copy automatically — here’s the link: ${shareUrl}`);
     }
   };
-
-  // ---- save as playlist ----------------------------------------------------
-  const [saving, setSaving] = useState(false);
-  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
-
-  // clear the saved-playlist link whenever a new route arrives
-  useEffect(() => {
-    setPlaylistUrl(null);
-  }, [route]);
-
-  const save = async () => {
-    if (!token) {
-      // remember intent, sign in (redirects away), resume on return
-      sessionStorage.setItem(PENDING_SAVE_KEY, "1");
-      onLogin();
-      return;
-    }
-    setSaving(true);
-    onError(null);
-    try {
-      const path = route.path;
-      const uris: string[] = [];
-      const startUri = route.requested_start.uri;
-      if (startUri && startUri !== path[0]?.uri) uris.push(startUri);
-      uris.push(...path.map((n) => n.uri));
-      const endUri = route.requested_end.uri;
-      if (endUri && endUri !== path[path.length - 1]?.uri) uris.push(endUri);
-      const clean = uris.filter((u) => /^spotify:track:/.test(u));
-      const name = `${route.requested_start.name} → ${route.requested_end.name}`;
-      const description =
-        `A Pathfinder journey of ${path.length} tracks.${route.context ? ` Context: ${route.context}.` : ""}`.trim();
-      const url = await createJourneyPlaylist(token, name, description, clean);
-      setPlaylistUrl(url);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        // token expired mid-session — re-auth and resume
-        sessionStorage.setItem(PENDING_SAVE_KEY, "1");
-        onLogin();
-        return;
-      }
-      onError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // auto-resume the save the user requested before being redirected to sign in
-  useEffect(() => {
-    if (token && sessionStorage.getItem(PENDING_SAVE_KEY)) {
-      sessionStorage.removeItem(PENDING_SAVE_KEY);
-      void save();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
 
   return (
     <div className="strip">
@@ -1946,45 +2213,16 @@ function JourneyStrip({
               <span>{copied ? "Link copied" : "Copy link"}</span>
             </button>
           )}
-          {canSave &&
-            (playlistUrl ? (
-              <a
-                className="action saved"
-                href={playlistUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Open the saved playlist in Spotify"
-              >
-                <ExternalLink size={14} aria-hidden />
-                <span>Open playlist</span>
-              </a>
-            ) : (
-              <button
-                className="action"
-                onClick={() => void save()}
-                disabled={saving}
-                aria-label={
-                  saving
-                    ? "Saving playlist"
-                    : token
-                      ? "Save as playlist"
-                      : "Save to Spotify"
-                }
-              >
-                {saving ? (
-                  <Loader2 size={14} className="spin" aria-hidden />
-                ) : (
-                  <ListMusic size={14} aria-hidden />
-                )}
-                <span>
-                  {saving
-                    ? "Saving…"
-                    : token
-                      ? "Save as playlist"
-                      : "Save to Spotify"}
-                </span>
-              </button>
-            ))}
+          <button
+            className="action build"
+            onClick={onBuildPlaylist}
+            aria-label="Build a playlist from this route"
+            title="Open the composer — gather nearby tracks and save a playlist"
+          >
+            <ListMusic size={14} aria-hidden />
+            <span>Build playlist</span>
+            <ArrowRight size={14} aria-hidden />
+          </button>
         </div>
       </div>
       <ol className="stripList" onMouseLeave={() => onFocus(null)}>
@@ -2017,6 +2255,317 @@ function JourneyStrip({
 }
 
 // ===========================================================================
+// Space C — the composer (the reel's curation panel)
+// ===========================================================================
+function ComposePanel({
+  route,
+  rows,
+  reach,
+  onReach,
+  reachCloud,
+  onCuration,
+  onToggle,
+  onInspect,
+  onBack,
+  token,
+  canSave,
+  onLogin,
+  onError,
+  playingId,
+  onAudition,
+}: {
+  route: RouteResponse;
+  rows: CurationRow[];
+  reach: number;
+  onReach: (level: number) => void;
+  reachCloud: ReachStop[];
+  onCuration: React.Dispatch<React.SetStateAction<Curation>>;
+  onToggle: (key: string, kind: "stop" | "nearby") => void;
+  onInspect: (n: TrackNode | null) => void;
+  onBack: () => void;
+  token: string | null;
+  canSave: boolean;
+  onLogin: () => void;
+  onError: (msg: string | null) => void;
+  playingId: string | null;
+  onAudition: (n: TrackNode) => void;
+}) {
+  const uris = useMemo(() => curationToUris(route, rows), [route, rows]);
+  const nearbyIncluded = rows.filter((r) => r.kind === "nearby").length;
+  const revealedCount = revealedCountOf(reachCloud.length, reach);
+
+  // ---- edits ---------------------------------------------------------------
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= rows.length || from === to) return;
+    const keys = rows.map((r) => r.key);
+    const [k] = keys.splice(from, 1);
+    keys.splice(to, 0, k);
+    onCuration((c) => ({ ...c, order: keys }));
+  };
+  const reset = () => {
+    onCuration(emptyCuration());
+    onReach(0);
+  };
+  const dirty =
+    reach > 0 || nearbyIncluded > 0 || rows.some((r) => !r.included);
+
+  // ---- drag reorder (pointer; keyboard via the grip) -----------------------
+  const listRef = useRef<HTMLOListElement>(null);
+  const dragKeyRef = useRef<string | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const onGripDown = (e: React.PointerEvent, key: string) => {
+    e.preventDefault();
+    try {
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    } catch {
+      /* best-effort */
+    }
+    dragKeyRef.current = key;
+    setDragKey(key);
+  };
+  const onGripMove = (e: React.PointerEvent) => {
+    if (!dragKeyRef.current || !listRef.current) return;
+    const items = Array.from(
+      listRef.current.querySelectorAll<HTMLElement>("li.crow"),
+    );
+    const y = e.clientY;
+    let target = items.length - 1;
+    for (let i = 0; i < items.length; i += 1) {
+      const r = items[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) {
+        target = i;
+        break;
+      }
+    }
+    const keys = rows.map((r) => r.key);
+    const from = keys.indexOf(dragKeyRef.current);
+    if (from === -1 || from === target) return;
+    keys.splice(target, 0, keys.splice(from, 1)[0]);
+    onCuration((c) => ({ ...c, order: keys }));
+  };
+  const endDrag = () => {
+    dragKeyRef.current = null;
+    setDragKey(null);
+  };
+
+  // ---- save to Spotify (browser PKCE; resumes across the OAuth redirect) ---
+  const [saving, setSaving] = useState(false);
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
+  useEffect(() => setPlaylistUrl(null), [route]);
+
+  const save = async () => {
+    if (!token) {
+      sessionStorage.setItem(PENDING_SAVE_KEY, "1");
+      onLogin();
+      return;
+    }
+    setSaving(true);
+    onError(null);
+    try {
+      const name = `${route.requested_start.name} → ${route.requested_end.name}`;
+      const description = [
+        `A Pathfinder playlist of ${uris.length} tracks`,
+        nearbyIncluded > 0 ? ` — ${nearbyIncluded} gathered nearby` : "",
+        ".",
+        route.context ? ` Context: ${route.context}.` : "",
+      ]
+        .join("")
+        .trim();
+      const url = await createJourneyPlaylist(token, name, description, uris);
+      setPlaylistUrl(url);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        sessionStorage.setItem(PENDING_SAVE_KEY, "1");
+        onLogin();
+        return;
+      }
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => {
+    if (token && sessionStorage.getItem(PENDING_SAVE_KEY)) {
+      sessionStorage.removeItem(PENDING_SAVE_KEY);
+      void save();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  let playPos = 0;
+  return (
+    <section className="compose" aria-label="Playlist composer">
+      <header className="composeTop">
+        <div className="composeTitle">
+          <span className="composeKicker">
+            <ListMusic size={13} aria-hidden /> Playlist
+          </span>
+          <h2>
+            {route.requested_start.name}
+            <ArrowRight size={15} aria-hidden />
+            {route.requested_end.name}
+          </h2>
+          <p className="composeMeta">
+            <b>{uris.length}</b> tracks · {route.path.length} stops
+            {nearbyIncluded > 0 && (
+              <>
+                {" "}
+                · <b>{nearbyIncluded}</b> gathered
+              </>
+            )}
+          </p>
+        </div>
+        <div className="composeActions">
+          {dirty && (
+            <button
+              className="action"
+              onClick={reset}
+              title="Reset to the route alone"
+            >
+              <RotateCcw size={14} aria-hidden />
+              <span>Reset</span>
+            </button>
+          )}
+          {canSave &&
+            (playlistUrl ? (
+              <a
+                className="action saved"
+                href={playlistUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink size={14} aria-hidden />
+                <span>Open in Spotify</span>
+              </a>
+            ) : (
+              <button
+                className="action build"
+                onClick={() => void save()}
+                disabled={saving || uris.length === 0}
+                aria-label={
+                  token
+                    ? `Save ${uris.length} tracks to Spotify`
+                    : "Sign in and save to Spotify"
+                }
+              >
+                {saving ? (
+                  <Loader2 size={14} className="spin" aria-hidden />
+                ) : (
+                  <ListMusic size={14} aria-hidden />
+                )}
+                <span>
+                  {saving
+                    ? "Saving…"
+                    : token
+                      ? `Save ${uris.length} to Spotify`
+                      : "Save to Spotify"}
+                </span>
+              </button>
+            ))}
+        </div>
+      </header>
+
+      <div className="composeFog">
+        <ReachControl
+          reach={reach}
+          onChange={onReach}
+          total={reachCloud.length}
+          revealed={revealedCount}
+        />
+        <p className="composeFogHint">
+          Widen to clear the fog — then <b>tap stars in the galaxy</b> to gather
+          nearby tracks into the playlist.
+        </p>
+      </div>
+
+      <ol className="composeList" ref={listRef}>
+        {rows.map((r, i) => {
+          const pos = r.included ? (playPos += 1) : 0;
+          const sounding = playingId === (r.node.uri || r.node.id);
+          return (
+            <li
+              key={r.key}
+              className={`crow ${r.kind === "stop" ? "crowStop" : "nearby"}${
+                r.included ? "" : " out"
+              }${dragKey === r.key ? " dragging" : ""}${
+                sounding ? " sounding" : ""
+              }`}
+              style={{ "--g": genreColor(r.node.genre) } as React.CSSProperties}
+            >
+              <button
+                className="grip"
+                aria-label={`Reorder ${r.node.name}. Use arrow keys to move.`}
+                onPointerDown={(e) => onGripDown(e, r.key)}
+                onPointerMove={onGripMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    move(i, i - 1);
+                  } else if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    move(i, i + 1);
+                  }
+                }}
+              >
+                <GripVertical size={15} aria-hidden />
+              </button>
+              <span className="crowIdx" aria-hidden>
+                {r.included ? pos : "—"}
+              </span>
+              <span
+                className={`crowDot${r.kind === "stop" ? " spine" : ""}`}
+                aria-hidden
+              />
+              <button
+                className="crowName"
+                onClick={() => onInspect(r.node)}
+                title="Track details"
+              >
+                <b>{r.node.name}</b>
+                <small>{r.node.artist}</small>
+              </button>
+              {r.kind === "nearby" && <span className="crowBadge">nearby</span>}
+              <button
+                className={`crowPlay${sounding ? " on" : ""}`}
+                onClick={() => onAudition(r.node)}
+                aria-label={`${sounding ? "Pause" : "Play a preview of"} ${r.node.name}`}
+              >
+                {sounding ? <Pause size={13} /> : <Play size={13} />}
+              </button>
+              <button
+                className="crowKeep"
+                onClick={() => onToggle(r.key, r.kind)}
+                aria-pressed={!r.included}
+                aria-label={
+                  r.included ? `Remove ${r.node.name}` : `Restore ${r.node.name}`
+                }
+                title={r.included ? "Remove from playlist" : "Restore"}
+              >
+                {r.included ? (
+                  <Trash2 size={13} aria-hidden />
+                ) : (
+                  <RotateCcw size={13} aria-hidden />
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {nearbyIncluded === 0 && (
+        <p className="composeEmpty">
+          <Orbit size={14} aria-hidden />
+          {reach === 0
+            ? "Just the route so far. Widen the fog above, then tap glowing stars in the galaxy to gather nearby tracks."
+            : "Tap the glowing stars in the galaxy to gather nearby tracks into your playlist."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ===========================================================================
 // 3D scene
 // ===========================================================================
 function Scene({
@@ -2027,6 +2576,13 @@ function Scene({
   onFocus,
   onInspect,
   warp,
+  includedIds,
+  mode,
+  reachCloud,
+  reach,
+  curation,
+  onToggle,
+  playingId,
 }: {
   route: RouteResponse | null;
   embed: EmbedResponse | null;
@@ -2035,7 +2591,15 @@ function Scene({
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
   warp: boolean;
+  includedIds: Set<string>;
+  mode: "route" | "explore" | "playlist";
+  reachCloud: ReachStop[];
+  reach: number;
+  curation: Curation;
+  onToggle: (key: string, kind: "stop" | "nearby") => void;
+  playingId: string | null;
 }) {
+  const composing = mode === "playlist" && !!route;
   // The route / explored track lives in its own sector (ROUTE_SECTOR) away from
   // the splash cloud. While the camera travels there we keep the splash cloud
   // mounted so it recedes into the fog behind us instead of cutting away —
@@ -2101,7 +2665,7 @@ function Scene({
             onCentroid={(c) => (splashCentroid.current = c)}
           />
         )}
-        {route && (
+        {route && !composing && (
           <RouteField
             route={route}
             focus={focus}
@@ -2111,6 +2675,18 @@ function Scene({
             onArrive={() => setArrived(true)}
             splashCentroid={splashCentroid.current}
             warp={warp}
+            includedIds={includedIds}
+          />
+        )}
+        {composing && route && (
+          <ComposeGalaxy
+            route={route}
+            reachCloud={reachCloud}
+            reach={reach}
+            curation={curation}
+            onToggle={onToggle}
+            onInspect={onInspect}
+            playingId={playingId}
           />
         )}
         {embed && (
@@ -2126,13 +2702,259 @@ function Scene({
         makeDefault
         enableDamping
         enablePan={false}
-        minDistance={7}
-        maxDistance={34}
+        minDistance={composing ? 9 : 7}
+        maxDistance={composing ? 44 : 34}
         autoRotate={idle && !prefersReducedMotion && !splashPaused}
         autoRotateSpeed={0.3}
       />
     </Canvas>
   );
+}
+
+// ===========================================================================
+// Space C — the compose galaxy. The route's region as a 3-D cluster you curate
+// directly: the path is a faint constellation thread through its real positions;
+// the neighborhood floats around as stars. Reach clears the fog (far stars stay
+// hazy, near ones resolve and turn clickable); clicking a star gathers it into
+// the playlist — it brightens and tethers to the path — or drops it again.
+// ===========================================================================
+const GALAXY_OX = -3.4; // shift the cluster left of the docked composer panel
+
+function ComposeGalaxy({
+  route,
+  reachCloud,
+  reach,
+  curation,
+  onToggle,
+  onInspect,
+  playingId,
+}: {
+  route: RouteResponse;
+  reachCloud: ReachStop[];
+  reach: number;
+  curation: Curation;
+  onToggle: (key: string, kind: "stop" | "nearby") => void;
+  onInspect: (n: TrackNode | null) => void;
+  playingId: string | null;
+}) {
+  // Each stop is its own little constellation: the stop sits at its place along
+  // the journey (route layout), and its nearby tracks orbit it as bodies — real
+  // direction preserved, distance normalized per stop so closer neighbors hug the
+  // star and the figure stays legible. Spokes draw the constellation. Positions
+  // are static; only styling changes as tracks are gathered.
+  const CONSTELLATION_R = 2; // world radius of each stop's halo of bodies
+  const { pathNodes, stars, thread, center, goal } = useMemo(() => {
+    const c = nodesCentroid(route.path);
+    let maxR = 1e-6;
+    for (const n of route.path)
+      maxR = Math.max(maxR, new THREE.Vector3(...n.position).distanceTo(c));
+    const s = 8 / maxR; // stops spread to ~±8
+    const tf = (p: [number, number, number]): [number, number, number] => [
+      GALAXY_OX + (p[0] - c.x) * s,
+      (p[1] - c.y) * s,
+      (p[2] - c.z) * s,
+    ];
+    const pathNodes = route.path.map((n) => ({ node: n, pos: tf(n.position) }));
+    // group the neighborhood by the stop each track sits closest to
+    const byStop = new Map<number, ReachStop[]>();
+    for (const r of reachCloud) {
+      const arr = byStop.get(r.pathIndex);
+      if (arr) arr.push(r);
+      else byStop.set(r.pathIndex, [r]);
+    }
+    const stars: {
+      r: ReachStop;
+      pos: [number, number, number];
+      stopPos: [number, number, number];
+    }[] = [];
+    byStop.forEach((sats, i) => {
+      const sp = route.path[i].position;
+      const stopPos = pathNodes[i].pos;
+      let md = 1e-6;
+      for (const sat of sats)
+        md = Math.max(
+          md,
+          Math.hypot(
+            sat.node.position[0] - sp[0],
+            sat.node.position[1] - sp[1],
+            sat.node.position[2] - sp[2],
+          ),
+        );
+      for (const sat of sats) {
+        const dx = sat.node.position[0] - sp[0];
+        const dy = sat.node.position[1] - sp[1];
+        const dz = sat.node.position[2] - sp[2];
+        const len = Math.hypot(dx, dy, dz) || 1e-6;
+        const radius = CONSTELLATION_R * (len / md); // closer hug the star
+        const k = radius / len;
+        stars.push({
+          r: sat,
+          stopPos,
+          pos: [stopPos[0] + dx * k, stopPos[1] + dy * k, stopPos[2] + dz * k],
+        });
+      }
+    });
+    const thread = pathNodes.map((p) => new THREE.Vector3(...p.pos));
+    return {
+      pathNodes,
+      stars,
+      thread,
+      center: new THREE.Vector3(GALAXY_OX, 0, 0),
+      goal: new THREE.Vector3(GALAXY_OX, 0, 25),
+    };
+  }, [route, reachCloud]);
+
+  const revealed = revealedNearbyIds(reachCloud, reach);
+  const gathered = curation.extra;
+
+  // constellation spokes: a line from each stop to its bodies. Revealed-but-not-
+  // gathered bodies get a faint spoke; gathered ones get a bright cyan one, so a
+  // stop's chosen tracks read as a lit figure.
+  const { faintSpokes, litSpokes } = useMemo(() => {
+    const faint: number[] = [];
+    const lit: number[] = [];
+    for (const st of stars) {
+      const id = st.r.node.id;
+      const into = gathered.has(id) ? lit : revealed.has(id) ? faint : null;
+      if (!into) continue;
+      into.push(
+        st.stopPos[0],
+        st.stopPos[1],
+        st.stopPos[2],
+        st.pos[0],
+        st.pos[1],
+        st.pos[2],
+      );
+    }
+    return {
+      faintSpokes: new Float32Array(faint),
+      litSpokes: new Float32Array(lit),
+    };
+  }, [stars, revealed, gathered]);
+
+  return (
+    <group>
+      <ComposeRig goal={goal} center={center} />
+      {faintSpokes.length > 0 && (
+        <WebLines positions={faintSpokes} color="#3a4670" opacity={0.32} />
+      )}
+      {litSpokes.length > 0 && (
+        <WebLines positions={litSpokes} color={COOL} opacity={0.55} />
+      )}
+      {thread.length >= 2 && (
+        <Line
+          points={thread}
+          color={SIGNAL}
+          lineWidth={1.6}
+          transparent
+          opacity={0.55}
+        />
+      )}
+      {/* path stops — the journey's backbone; tap to inspect */}
+      {pathNodes.map((p) => {
+        const kept = !curation.excluded.has(p.node.id);
+        const sounding = playingId === (p.node.uri || p.node.id);
+        return (
+          <GlowDot
+            key={p.node.id}
+            position={p.pos}
+            color={kept ? "#fff2f7" : "#7a8197"}
+            size={kept ? 0.12 : 0.07}
+            glow={kept ? (sounding ? 1.8 : 1.1) : 0.3}
+            onPick={() => onInspect(p.node)}
+            label={{ name: p.node.name, artist: p.node.artist }}
+          />
+        );
+      })}
+      {/* neighborhood — gathered (bright) / revealed (clickable) / fog (faint) */}
+      {stars.map((st) => {
+        const id = st.r.node.id;
+        const inPlaylist = gathered.has(id);
+        const sounding = playingId === (st.r.node.uri || st.r.node.id);
+        if (!inPlaylist && !revealed.has(id))
+          return (
+            <GlowDot
+              key={id}
+              position={st.pos}
+              color="#39425f"
+              size={0.035}
+              glow={0.12}
+            />
+          );
+        return (
+          <GlowDot
+            key={id}
+            position={st.pos}
+            color={genreColor(st.r.node.genre)}
+            size={inPlaylist ? 0.09 : 0.058}
+            glow={inPlaylist ? (sounding ? 1.7 : 1) : 0.5}
+            onPick={() => onToggle(id, "nearby")}
+            label={{ name: st.r.node.name, artist: st.r.node.artist }}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+// Eases the camera to a head-on view of the cluster on entry, then hands control
+// back to OrbitControls (so the listener can still orbit the galaxy).
+function ComposeRig({
+  goal,
+  center,
+}: {
+  goal: THREE.Vector3;
+  center: THREE.Vector3;
+}) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as {
+    target: THREE.Vector3;
+    update: () => void;
+    enabled: boolean;
+  } | null;
+  const anim = useRef<{
+    from: THREE.Vector3;
+    tgt: THREE.Vector3;
+    t: number;
+    done: boolean;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      if (controls) controls.enabled = true;
+    },
+    [controls],
+  );
+  useFrame((_, delta) => {
+    if (anim.current?.done) return;
+    if (!anim.current) {
+      if (prefersReducedMotion) {
+        camera.position.copy(goal);
+        if (controls) controls.target.copy(center);
+        camera.lookAt(center);
+        anim.current = { from: goal, tgt: center.clone(), t: 1, done: true };
+        return;
+      }
+      anim.current = {
+        from: camera.position.clone(),
+        tgt: controls ? controls.target.clone() : center.clone(),
+        t: 0,
+        done: false,
+      };
+      if (controls) controls.enabled = false;
+    }
+    const a = anim.current;
+    a.t = Math.min(1, a.t + delta / 1.3);
+    const e = easeInOutCubic(a.t);
+    camera.position.lerpVectors(a.from, goal, e);
+    const cur = a.tgt.clone().lerp(center, e);
+    if (controls) controls.target.copy(cur);
+    camera.lookAt(cur);
+    if (a.t >= 1) {
+      a.done = true;
+      if (controls) controls.enabled = true;
+    }
+  });
+  return null;
 }
 
 // Fallback route sector used only when the splash centroid isn't known yet (e.g.
@@ -2379,6 +3201,7 @@ function RouteField({
   onArrive,
   splashCentroid,
   warp,
+  includedIds,
 }: {
   route: RouteResponse;
   focus: number | null;
@@ -2388,6 +3211,7 @@ function RouteField({
   onArrive: () => void;
   splashCentroid: THREE.Vector3 | null;
   warp: boolean;
+  includedIds: Set<string>;
 }) {
   // Freeze the splash centroid at mount. It lives in a ref on the parent that
   // the idle field updates asynchronously — and on a *second* trace (or after an
@@ -2503,9 +3327,12 @@ function RouteField({
     return m;
   }, [R]);
 
-  // faint web: each cloud node → nearest path point (shows the manifold)
-  const web = useMemo(() => {
-    const segs: number[] = [];
+  // Faint web: each cloud node → its nearest path point (shows the manifold).
+  // Split by envelope membership so gathered tracks tether to the route in a
+  // brighter cyan while the rest stay a dim background lattice.
+  const { webOn, webOff } = useMemo(() => {
+    const on: number[] = [];
+    const off: number[] = [];
     for (const c of R.cloud) {
       const cp = new THREE.Vector3(...c.position);
       let best = pathPts[0];
@@ -2517,16 +3344,20 @@ function RouteField({
           best = p;
         }
       }
-      segs.push(cp.x, cp.y, cp.z, best.x, best.y, best.z);
+      const seg = includedIds.has(c.id) ? on : off;
+      seg.push(cp.x, cp.y, cp.z, best.x, best.y, best.z);
     }
-    return new Float32Array(segs);
-  }, [R, pathPts]);
+    return { webOn: new Float32Array(on), webOff: new Float32Array(off) };
+  }, [R, pathPts, includedIds]);
 
   const snapEdges = R.edges.filter((e) => e.kind === "snap");
 
   return (
     <group>
-      <WebLines positions={web} />
+      <WebLines positions={webOff} />
+      {webOn.length > 0 && (
+        <WebLines positions={webOn} color={COOL} opacity={0.5} />
+      )}
 
       {/* the warp ribbon — the route as a banking, luminous band that carries
           the hidden axis (tilt), fit (brightness), transition (flow) + genre */}
@@ -2571,17 +3402,21 @@ function RouteField({
         );
       })}
 
-      {/* cloud — tappable for info, but unlabeled by default to avoid clutter */}
-      {R.cloud.map((n) => (
-        <GlowDot
-          key={n.id}
-          position={n.position}
-          color={genreColor(n.genre)}
-          size={0.05}
-          glow={0.55}
-          onPick={() => onInspect(n)}
-        />
-      ))}
+      {/* cloud — tappable for info, unlabeled by default to avoid clutter.
+          Tracks the envelope has gathered swell and brighten; the rest recede. */}
+      {R.cloud.map((n) => {
+        const inEnvelope = includedIds.has(n.id);
+        return (
+          <GlowDot
+            key={n.id}
+            position={n.position}
+            color={genreColor(n.genre)}
+            size={inEnvelope ? 0.085 : 0.042}
+            glow={inEnvelope ? 1 : 0.4}
+            onPick={() => onInspect(n)}
+          />
+        );
+      })}
 
       {/* path nodes */}
       {R.path.map((n, i) => (
@@ -2791,7 +3626,15 @@ function RouteFlyIn({
   return null;
 }
 
-function WebLines({ positions }: { positions: Float32Array }) {
+function WebLines({
+  positions,
+  color = "#3a4670",
+  opacity = 0.28,
+}: {
+  positions: Float32Array;
+  color?: string;
+  opacity?: number;
+}) {
   const geo = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -2800,9 +3643,9 @@ function WebLines({ positions }: { positions: Float32Array }) {
   return (
     <lineSegments geometry={geo}>
       <lineBasicMaterial
-        color="#3a4670"
+        color={color}
         transparent
-        opacity={0.28}
+        opacity={opacity}
         depthWrite={false}
       />
     </lineSegments>

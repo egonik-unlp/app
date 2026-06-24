@@ -355,15 +355,17 @@ pub fn route(
             path
         };
 
-        // cloud: up to 8 nearest neighbors per path node, capped at 90
+        // cloud: up to 12 nearest neighbors per path node, capped at 150 — a
+        // wider neighborhood so the composer's "reveal" can reach further out
+        // around each stop (the baked knn_k is 20, so there's headroom).
         let mut cloud: Vec<usize> = Vec::new();
         let mut seen: std::collections::HashSet<usize> = path.iter().copied().collect();
         'outer: for &pid in &path {
-            for (nbr, _) in c.neighbors(pid).into_iter().take(8) {
+            for (nbr, _) in c.neighbors(pid).into_iter().take(12) {
                 if seen.insert(nbr) {
                     cloud.push(nbr);
                 }
-                if cloud.len() >= 90 {
+                if cloud.len() >= 150 {
                     break 'outer;
                 }
             }
