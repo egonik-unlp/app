@@ -458,12 +458,265 @@ function json(obj: unknown, status = 200): Response {
   });
 }
 
+function htmlResponse(html: string, status = 200): Response {
+  return new Response(html, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8", ...CORS },
+  });
+}
+
+// ---- API docs --------------------------------------------------------------
+// Swagger UI, loaded from a CDN (consistent with the app shell, which already
+// pulls web fonts from a CDN). It renders the spec served at /api/openapi.json.
+const SWAGGER_HTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pathfinder API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
+  <style>body { margin: 0; background: #fafafa; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "/api/openapi.json",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      tryItOutEnabled: true,
+    });
+  </script>
+</body>
+</html>`;
+
+// OpenAPI 3.0 description of the public /api surface. `origin` is wired in as the
+// server so Swagger UI's "Try it out" hits this same deployment.
+function openApiSpec(origin: string) {
+  const trackNode = {
+    type: "object",
+    description: "A track placed in the shared 3D layout space.",
+    properties: {
+      id: { type: "string" },
+      uri: { type: "string", example: "spotify:track:7b4fQNd34RVNFKKziQz6mS" },
+      name: { type: "string" },
+      artist: { type: "string" },
+      album: { type: "string", nullable: true },
+      genre: { type: "string" },
+      spotify_url: { type: "string", nullable: true },
+      fit: { type: "number", nullable: true, description: "Listening-fit score, 0–1." },
+      w: { type: "number", description: "Hidden 4th PCA axis (ribbon bank)." },
+      position: {
+        type: "array",
+        items: { type: "number" },
+        minItems: 3,
+        maxItems: 3,
+        description: "[x, y, z] in the shared layout space.",
+      },
+      kind: { type: "string", enum: ["path", "cloud", "requested"] },
+      snapped_to: { type: "string", nullable: true, description: "Anchor id when cold-start-snapped." },
+      snapped_label: { type: "string", nullable: true },
+    },
+  };
+  const routeResponse = {
+    type: "object",
+    properties: {
+      context: { type: "string", nullable: true, description: "Time-of-day context the route was scored under." },
+      requested_start: { $ref: "#/components/schemas/TrackNode" },
+      requested_end: { $ref: "#/components/schemas/TrackNode" },
+      path: { type: "array", items: { $ref: "#/components/schemas/TrackNode" }, description: "Ordered stops, start → end." },
+      cloud: { type: "array", items: { $ref: "#/components/schemas/TrackNode" }, description: "Nearby tracks for context." },
+      edges: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            from: { type: "string" },
+            to: { type: "string" },
+            kind: { type: "string", enum: ["path", "snap"] },
+          },
+        },
+      },
+    },
+  };
+  const errorResponse = {
+    description: "Error",
+    content: {
+      "application/json": {
+        schema: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  };
+  const okRoute = {
+    description: "A traced route.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/RouteResponse" } } },
+  };
+  return {
+    openapi: "3.0.3",
+    info: {
+      title: "Spotify Pathfinder API",
+      version: "1.0.0",
+      description:
+        "Traces an A* route across the taste map between two Spotify tracks and " +
+        "returns it as an ordered path in a shared 3D layout space. Arbitrary " +
+        "(non-corpus) tracks are cold-start embedded and snapped to the nearest anchor.",
+    },
+    servers: [{ url: origin }],
+    paths: {
+      "/api/path": {
+        get: {
+          summary: "Trace a route (GET)",
+          description: "Shareable, curl-friendly form of POST /api/route.",
+          parameters: [
+            { name: "from", in: "query", required: true, schema: { type: "string" }, description: "Start track: Spotify id, spotify:track: uri, or open.spotify.com URL.", example: "7b4fQNd34RVNFKKziQz6mS" },
+            { name: "to", in: "query", required: true, schema: { type: "string" }, description: "End track (same formats as from).", example: "3IvodZAm4vD1PM3bIEw9Ik" },
+            { name: "len", in: "query", schema: { type: "integer", default: 14, minimum: 4, maximum: 50 }, description: "Target number of stops." },
+            { name: "ctx", in: "query", schema: { type: "string", default: "now", enum: ["now", "any", "morning", "afternoon", "evening", "night"] }, description: "Time-of-day context for scoring." },
+            { name: "shuf", in: "query", schema: { type: "string", default: "any" }, description: "Shuffle/variation preference." },
+          ],
+          responses: { "200": okRoute, "400": errorResponse, "404": errorResponse, "422": errorResponse },
+        },
+      },
+      "/api/route": {
+        post: {
+          summary: "Trace a route (POST)",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["start_uri", "end_uri"],
+                  properties: {
+                    start_uri: { type: "string", example: "spotify:track:7b4fQNd34RVNFKKziQz6mS" },
+                    end_uri: { type: "string", example: "spotify:track:3IvodZAm4vD1PM3bIEw9Ik" },
+                    length: { type: "integer", default: 14, minimum: 4, maximum: 50 },
+                    context: { type: "string", default: "now" },
+                    shuffle: { type: "string", default: "any" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": okRoute, "400": errorResponse, "404": errorResponse, "422": errorResponse },
+        },
+      },
+      "/api/embed": {
+        post: {
+          summary: "Embed one track and its neighborhood",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { type: "object", required: ["uri"], properties: { uri: { type: "string", example: "spotify:track:7b4fQNd34RVNFKKziQz6mS" } } },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "The track plus its nearest neighbors in the layout space.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      track: { $ref: "#/components/schemas/TrackNode" },
+                      cloud: { type: "array", items: { $ref: "#/components/schemas/TrackNode" } },
+                    },
+                  },
+                },
+              },
+            },
+            "400": errorResponse,
+            "422": errorResponse,
+          },
+        },
+      },
+      "/api/search": {
+        get: {
+          summary: "Search tracks",
+          parameters: [{ name: "q", in: "query", required: true, schema: { type: "string" }, example: "alan braxe" }],
+          responses: {
+            "200": {
+              description: "Matching tracks.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        spotify_id: { type: "string" },
+                        uri: { type: "string" },
+                        name: { type: "string" },
+                        artist: { type: "string" },
+                        album: { type: "string", nullable: true },
+                        art: { type: "string", nullable: true },
+                        in_corpus: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/sample": {
+        get: {
+          summary: "Sample a region of the corpus (splash field)",
+          parameters: [
+            { name: "n", in: "query", schema: { type: "integer", default: 130, minimum: 1, maximum: 400 } },
+            { name: "seed", in: "query", schema: { type: "integer" }, description: "Omit for a random region." },
+          ],
+          responses: {
+            "200": { description: "A neighborhood of tracks.", content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/TrackNode" } } } } },
+          },
+        },
+      },
+      "/api/preview": {
+        get: {
+          summary: "Find a 30s preview clip for a track",
+          parameters: [
+            { name: "artist", in: "query", schema: { type: "string" }, example: "Alan Braxe" },
+            { name: "track", in: "query", schema: { type: "string" }, example: "Intro" },
+          ],
+          responses: {
+            "200": {
+              description: "A preview URL (or null) and its source.",
+              content: { "application/json": { schema: { type: "object", properties: { preview_url: { type: "string", nullable: true }, source: { type: "string" } } } } },
+            },
+          },
+        },
+      },
+      "/api/health": {
+        get: {
+          summary: "Service health + corpus size",
+          responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { ready: { type: "boolean" }, tracks: { type: "integer" }, cold_start: { type: "boolean" } } } } } } },
+        },
+      },
+      "/api/config": {
+        get: {
+          summary: "Public client config",
+          responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { spotify_client_id: { type: "string", nullable: true } } } } } } },
+        },
+      },
+    },
+    components: { schemas: { TrackNode: trackNode, RouteResponse: routeResponse } },
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (url.pathname.startsWith("/api/")) {
+      // API docs need no compute core — serve them before warming the corpus so
+      // they work even if the snapshot is missing.
+      if (url.pathname === "/api/docs") return htmlResponse(SWAGGER_HTML);
+      if (url.pathname === "/api/openapi.json") return json(openApiSpec(url.origin));
       try {
         const state = await ensureReady(env);
         if (url.pathname === "/api/health") {
@@ -572,6 +825,27 @@ export default {
           const payload = await request.json().catch(() => ({}));
           return json(await buildRoute(env, payload, state.hasProjector));
         }
+        // GET equivalent of /api/route — shareable, curl-friendly, documented in
+        // Swagger. `from`/`to` accept a bare Spotify id, a spotify:track: uri, or
+        // an open.spotify.com URL; the rest mirror the permalink query params.
+        if (url.pathname === "/api/path" && request.method === "GET") {
+          const from = url.searchParams.get("from");
+          const to = url.searchParams.get("to");
+          if (!from || !to) {
+            throw new ApiError(
+              400,
+              "from and to query params are required (Spotify track id, uri, or URL)",
+            );
+          }
+          const payload = {
+            start_uri: `spotify:track:${spotifyIdOf(from)}`,
+            end_uri: `spotify:track:${spotifyIdOf(to)}`,
+            length: url.searchParams.get("len") ?? undefined,
+            context: url.searchParams.get("ctx") ?? undefined,
+            shuffle: url.searchParams.get("shuf") ?? undefined,
+          };
+          return json(await buildRoute(env, payload, state.hasProjector));
+        }
         if (url.pathname === "/api/embed" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
           return json(await buildEmbed(env, payload, state.hasProjector));
@@ -582,6 +856,11 @@ export default {
         return json({ error: String(e?.message ?? e) }, status);
       }
     }
+
+    // Friendly top-level aliases for the API docs — people reach for /docs, not
+    // /api/docs. The Swagger UI still loads its spec from /api/openapi.json.
+    if (url.pathname === "/docs") return htmlResponse(SWAGGER_HTML);
+    if (url.pathname === "/openapi.json") return json(openApiSpec(url.origin));
 
     // static assets (SPA)
     return env.ASSETS.fetch(request);

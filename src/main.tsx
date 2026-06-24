@@ -119,6 +119,34 @@ const post = (body: unknown): RequestInit => ({
 // bare Spotify track id from a uri/url (for compact shareable permalinks)
 const idOf = (uri: string) => uri.split("?")[0].replace(/.*[:/]/, "");
 
+// Detect the same underlying recording across slightly different Spotify entries
+// — an original and its remaster, a single vs an album cut — which A* can place
+// back-to-back as separate stops. Used to collapse those duplicates out of the
+// journey so it doesn't replay the same clip (and skip a dead stop) at the head.
+const normArtist = (a: string) =>
+  (a.split(/,|;|&| feat\.?| ft\.?| with /i)[0] || a).trim().toLowerCase();
+const normTitle = (t: string) =>
+  (
+    t
+      .replace(/\([^)]*\)/g, "")
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/\s-\s.*$/, "")
+      .trim() || t
+  )
+    .trim()
+    .toLowerCase();
+const sameRecording = (a: TrackNode, b: TrackNode) =>
+  (!!a.uri && a.uri === b.uri) ||
+  (normArtist(a.artist) === normArtist(b.artist) &&
+    normTitle(a.name) === normTitle(b.name));
+
+// Stable key for a node, matching the playback engine's keyOf.
+const nodeKey = (n: TrackNode) => n.uri || n.id;
+// Does this node carry the given (selected / playing) key? Drives the on-dot
+// markers, which are distinct: a soft aura for selected, a ring for playing.
+const matchKey = (n: TrackNode, key: string | null) =>
+  key != null && nodeKey(n) === key;
+
 // ---------------------------------------------------------------------------
 // Spotify user auth — Authorization Code + PKCE, run entirely in the browser.
 // Lets a listener save the journey to their own account. No client secret and
@@ -370,6 +398,23 @@ function genreColor(genre: string): string {
   return GENRE_PALETTE[hash % GENRE_PALETTE.length];
 }
 
+// On the ribbon, genre is a *secondary* cue — the dots and the legend hold the
+// authoritative, full-saturation genre identity. The raw neon palette reads too
+// hot on the band and adjacent genres clash, so we calm it: keep the hue, drop
+// the saturation (RIBBON_SAT), and pull every colour partway toward a shared
+// slate (RIBBON_CONVERGE) so consecutive stops differ gently instead of jumping.
+// Genres stay distinguishable; the progression just stops shouting.
+const RIBBON_TONE = new THREE.Color("#94a6c9");
+const RIBBON_SAT = 0.62; // fraction of genre saturation kept on the ribbon
+const RIBBON_CONVERGE = 0.32; // how far each hue settles toward RIBBON_TONE
+function ribbonColor(genre: string): THREE.Color {
+  const c = new THREE.Color(genreColor(genre));
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  c.setHSL(hsl.h, hsl.s * RIBBON_SAT, hsl.l);
+  return c.lerp(RIBBON_TONE, RIBBON_CONVERGE);
+}
+
 // smooth accel/decel for the route fly-in
 const easeInOutCubic = (t: number) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -542,6 +587,11 @@ function curationToUris(route: RouteResponse, rows: CurationRow[]): string[] {
   );
 }
 
+// Orbit zoom bounds, shared by OrbitControls and the double-click re-center so a
+// tight zoom stays valid (and conserved) when the camera hops between tracks.
+const ORBIT_MIN = 3; // how close you can get to a star
+const ORBIT_MAX = 34;
+
 // 0.05s of silence — played inside the first user gesture to unlock the audio
 // element so later programmatic play() calls (after an awaited preview fetch)
 // aren't blocked by the browser autoplay policy.
@@ -646,15 +696,24 @@ function usePlayback(
   const keyOf = (n: TrackNode) => n.uri || n.id;
 
   const playQueue = useMemo(() => {
-    const q: { node: TrackNode; focus: number | null }[] = [];
-    if (!route) return q;
+    const raw: { node: TrackNode; focus: number | null }[] = [];
+    if (!route) return raw;
     const path = route.path;
     const s = route.requested_start;
-    if (s?.uri && s.uri !== path[0]?.uri) q.push({ node: s, focus: null });
-    path.forEach((n, i) => q.push({ node: n, focus: i }));
+    if (s?.uri && s.uri !== path[0]?.uri) raw.push({ node: s, focus: null });
+    path.forEach((n, i) => raw.push({ node: n, focus: i }));
     const e = route.requested_end;
     if (e?.uri && e.uri !== path[path.length - 1]?.uri)
-      q.push({ node: e, focus: null });
+      raw.push({ node: e, focus: null });
+    // Collapse consecutive stops that are the same recording (e.g. an "Intro"
+    // and its remaster the router placed back-to-back). Otherwise the journey
+    // plays the same clip twice and visibly skips a dead stop at the head.
+    const q: { node: TrackNode; focus: number | null }[] = [];
+    for (const item of raw) {
+      const prev = q[q.length - 1];
+      if (prev && sameRecording(prev.node, item.node)) continue;
+      q.push(item);
+    }
     return q;
   }, [route]);
 
@@ -753,13 +812,21 @@ function usePlayback(
     const blocked = () =>
       stop("Your browser blocked autoplay — press Play journey again.");
     const key = keyOf(item.node);
-    if (previews.current.has(key))
-      startClip(key, previews.current.get(key)!, blocked);
-    else
+    const cached = previews.current.get(key);
+    if (typeof cached === "string") {
+      startClip(key, cached, blocked);
+    } else {
+      // Not warmed yet (undefined) OR a warm-time miss (null). Warm-up fires a
+      // burst of lookups the moment a route loads — during the Worker's cold
+      // start those first fetches (the journey's opening stops) can transiently
+      // fail and cache a null, which then made playback skip them in ~350ms of
+      // silence. Drop a cached null and fetch fresh before deciding to skip.
+      if (cached === null) previews.current.delete(key);
       void fetchPreviewFor(item.node).then((url) => {
         if (playingRef.current && idxRef.current === i)
           startClip(key, url, blocked);
       });
+    }
   };
 
   const togglePlay = () => {
@@ -1279,6 +1346,8 @@ function App() {
         curation={curation}
         onToggle={toggleTrack}
         playingId={playback.playingId}
+        selKey={inspect ? inspect.uri || inspect.id : null}
+        playKey={playback.playingId}
       />
 
       {/* engraved plate border framing the map (decorative) */}
@@ -2528,6 +2597,8 @@ function Scene({
   curation,
   onToggle,
   playingId,
+  selKey,
+  playKey,
 }: {
   route: RouteResponse | null;
   embed: EmbedResponse | null;
@@ -2543,6 +2614,8 @@ function Scene({
   curation: Curation;
   onToggle: (key: string, kind: "stop" | "nearby") => void;
   playingId: string | null;
+  selKey: string | null;
+  playKey: string | null;
 }) {
   const composing = mode === "playlist" && !!route;
   // The route / explored track lives in its own sector (ROUTE_SECTOR) away from
@@ -2565,12 +2638,39 @@ function Scene({
   // because GlowDot stops propagation on its own pointer events.
   const [splashPaused, setSplashPaused] = useState(false);
 
+  // Double-click-to-center: requestCenter parks the orbit pivot on a dot's world
+  // position (CameraFocus animates to it). `manual` tells the route's FocusRig to
+  // stand down so it doesn't yank the camera back to the journey; it's released
+  // when the user clicks empty space, the journey focus changes, or a new
+  // route/embed loads.
+  const manual = useRef(false);
+  const [center, setCenter] = useState<{
+    p: [number, number, number];
+    nonce: number;
+  } | null>(null);
+  const nonce = useRef(0);
+  const requestCenter = (w: THREE.Vector3) => {
+    manual.current = true;
+    nonce.current += 1;
+    setCenter({ p: [w.x, w.y, w.z], nonce: nonce.current });
+  };
+  // a moving journey (or a fresh route/embed) reclaims the camera
+  useEffect(() => {
+    if (focus != null) manual.current = false;
+  }, [focus]);
+  useEffect(() => {
+    manual.current = false;
+  }, [route, embed]);
+
   return (
     <Canvas
       camera={{ position: [0, 4, 19], fov: 50 }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
-      onPointerMissed={() => setSplashPaused(false)}
+      onPointerMissed={() => {
+        setSplashPaused(false);
+        manual.current = false; // a void click releases a manual camera park
+      }}
     >
       <color attach="background" args={["#02030a"]} />
       <fog attach="fog" args={["#02030a", 19, 48]} />
@@ -2607,7 +2707,10 @@ function Scene({
               if (n) setSplashPaused(true);
               onInspect(n);
             }}
+            onCenter={requestCenter}
             onCentroid={(c) => (splashCentroid.current = c)}
+            selKey={selKey}
+            playKey={playKey}
           />
         )}
         {route && !composing && (
@@ -2616,11 +2719,15 @@ function Scene({
             focus={focus}
             onFocus={onFocus}
             onInspect={onInspect}
+            onCenter={requestCenter}
+            manual={manual}
             arrived={arrived}
             onArrive={() => setArrived(true)}
             splashCentroid={splashCentroid.current}
             warp={warp}
             includedIds={includedIds}
+            selKey={selKey}
+            playKey={playKey}
           />
         )}
         {composing && route && (
@@ -2638,17 +2745,21 @@ function Scene({
           <EmbedField
             embed={embed}
             onInspect={onInspect}
+            onCenter={requestCenter}
             onArrive={() => setArrived(true)}
             splashCentroid={splashCentroid.current}
+            selKey={selKey}
+            playKey={playKey}
           />
         )}
       </Suspense>
+      <CameraFocus req={center} />
       <OrbitControls
         makeDefault
         enableDamping
         enablePan={false}
-        minDistance={composing ? 9 : 7}
-        maxDistance={composing ? 44 : 34}
+        minDistance={composing ? 9 : ORBIT_MIN}
+        maxDistance={composing ? 44 : ORBIT_MAX}
         autoRotate={idle && !prefersReducedMotion && !splashPaused}
         autoRotateSpeed={0.3}
       />
@@ -2962,11 +3073,17 @@ function fitToField(nodes: TrackNode[]): TrackNode[] {
 function IdleField({
   paused,
   onInspect,
+  onCenter,
   onCentroid,
+  selKey,
+  playKey,
 }: {
   paused: boolean;
   onInspect: (n: TrackNode | null) => void;
+  onCenter: (world: THREE.Vector3) => void;
   onCentroid: (c: THREE.Vector3) => void;
+  selKey: string | null;
+  playKey: string | null;
 }) {
   const group = useRef<THREE.Group>(null);
   const fallback = useMemo(proceduralDots, []);
@@ -3015,6 +3132,9 @@ function IdleField({
               glow={0.5}
               label={{ name: n.name, artist: n.artist }}
               onPick={() => onInspect(n)}
+              onCenter={onCenter}
+              selected={matchKey(n, selKey)}
+              playing={matchKey(n, playKey)}
             />
           ))
         : fallback.map((d, i) => (
@@ -3024,28 +3144,103 @@ function IdleField({
   );
 }
 
+// Marks the currently-inspected (and/or playing) dot so you can find it on the
+// map — e.g. to watch where the track you just pressed play on sits. A
+// camera-facing ring in the signal hue, gently pulsing so it reads as "here"
+// without competing with the dots' own glow.
+// The track currently SOUNDING: a crisp magenta ring with a brisk pulse — it
+// reads as "alive / playing now" and travels as the journey advances.
+function PlayingRing({ size }: { size: number }) {
+  const ref = useRef<THREE.Group>(null);
+  const r = Math.max(size * 3.0, 0.24);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const s = prefersReducedMotion
+      ? 1
+      : 1 + Math.sin(clock.elapsedTime * 3.2) * 0.08;
+    ref.current.scale.setScalar(s);
+  });
+  return (
+    <Billboard>
+      <group ref={ref}>
+        <mesh>
+          <ringGeometry args={[r * 0.86, r, 56]} />
+          <meshBasicMaterial
+            color={SIGNAL}
+            transparent
+            opacity={0.62}
+            side={THREE.DoubleSide}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
+    </Billboard>
+  );
+}
+
+// The track currently SELECTED (inspector open): a soft cool aura that slowly
+// breathes — a quiet "you're looking at this one", distinct from the playing
+// ring in both shape (glow vs ring) and colour (cool vs magenta).
+function SelectionAura({ size }: { size: number }) {
+  const mat = useRef<THREE.SpriteMaterial>(null);
+  const base = Math.max(size * 18, 0.85);
+  useFrame(({ clock }) => {
+    if (!mat.current) return;
+    const k = prefersReducedMotion
+      ? 0.5
+      : Math.sin(clock.elapsedTime * 1.5) * 0.5 + 0.5;
+    mat.current.opacity = 0.16 + 0.16 * k;
+  });
+  if (!haloTexture) return null;
+  return (
+    <sprite scale={base}>
+      <spriteMaterial
+        ref={mat}
+        map={haloTexture}
+        color="#bcd2ff"
+        blending={THREE.AdditiveBlending}
+        transparent
+        depthWrite={false}
+        opacity={0.24}
+        toneMapped={false}
+      />
+    </sprite>
+  );
+}
+
 function GlowDot({
   position,
   color,
   size,
   glow = 1,
   onPick,
+  onCenter,
   onHover,
   label,
+  selected = false,
+  playing = false,
 }: {
   position: [number, number, number];
   color: string;
   size: number;
   glow?: number;
   onPick?: () => void;
+  // Double-tap: center the camera/navigation on this dot (world position).
+  onCenter?: (world: THREE.Vector3) => void;
   onHover?: (hovering: boolean) => void;
   label?: { name: string; artist: string };
+  selected?: boolean;
+  playing?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   // Press point, so a tap (small movement) opens the inspector while a drag
   // (camera rotate) does not. Pointer capture on press guarantees the matching
   // pointerup reaches this dot even as the cloud rotates underneath the finger.
   const down = useRef<{ x: number; y: number } | null>(null);
+  // Timestamp of the previous tap on this dot, for double-tap detection.
+  const lastTap = useRef(0);
   return (
     <group position={position}>
       {/* generous invisible hit target for mouse + touch */}
@@ -3077,14 +3272,29 @@ function GlowDot({
             const d = down.current;
             down.current = null;
             const ne = e.nativeEvent as PointerEvent;
-            if (d && Math.hypot(ne.clientX - d.x, ne.clientY - d.y) < 12)
-              onPick();
+            if (!d || Math.hypot(ne.clientX - d.x, ne.clientY - d.y) >= 12)
+              return;
+            onPick();
+            // A second tap on the same dot within the window centers the camera
+            // on it — surface the track first, then dive in to explore around it.
+            const t = ne.timeStamp || 0;
+            if (onCenter && t - lastTap.current < 340) {
+              const w = new THREE.Vector3();
+              (e.eventObject as THREE.Object3D).getWorldPosition(w);
+              onCenter(w);
+            }
+            lastTap.current = t;
           }}
         >
           <sphereGeometry args={[Math.max(size * 3, 0.18), 12, 12]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
+      {playing ? (
+        <PlayingRing size={size} />
+      ) : selected ? (
+        <SelectionAura size={size} />
+      ) : null}
       <mesh scale={hover ? 1.7 : 1}>
         <sphereGeometry args={[size, 16, 16]} />
         <meshStandardMaterial
@@ -3142,21 +3352,29 @@ function RouteField({
   focus,
   onFocus,
   onInspect,
+  onCenter,
+  manual,
   arrived,
   onArrive,
   splashCentroid,
   warp,
   includedIds,
+  selKey,
+  playKey,
 }: {
   route: RouteResponse;
   focus: number | null;
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
+  onCenter: (world: THREE.Vector3) => void;
+  manual: React.MutableRefObject<boolean>;
   arrived: boolean;
   onArrive: () => void;
   splashCentroid: THREE.Vector3 | null;
   warp: boolean;
   includedIds: Set<string>;
+  selKey: string | null;
+  playKey: string | null;
 }) {
   // Freeze the splash centroid at mount. It lives in a ref on the parent that
   // the idle field updates asynchronously — and on a *second* trace (or after an
@@ -3254,7 +3472,7 @@ function RouteField({
       const tr = n.why?.transition;
       return tr != null ? Math.max(0, Math.min(1, tr * 4)) : 0;
     });
-    const colors = R.path.map((n) => new THREE.Color(genreColor(n.genre)));
+    const colors = R.path.map((n) => ribbonColor(n.genre));
     return { segF, wn, fit, flow, colors };
   }, [curve, pathPts, R]);
 
@@ -3324,7 +3542,7 @@ function RouteField({
           color={SIGNAL}
           lineWidth={2}
           transparent
-          opacity={0.85}
+          opacity={0.72}
         />
       )}
 
@@ -3359,6 +3577,9 @@ function RouteField({
             size={inEnvelope ? 0.085 : 0.042}
             glow={inEnvelope ? 1 : 0.4}
             onPick={() => onInspect(n)}
+            onCenter={onCenter}
+            selected={matchKey(n, selKey)}
+            playing={matchKey(n, playKey)}
           />
         );
       })}
@@ -3372,6 +3593,9 @@ function RouteField({
           focused={focus === i}
           onFocus={onFocus}
           onInspect={onInspect}
+          onCenter={onCenter}
+          selected={matchKey(n, selKey)}
+          playing={matchKey(n, playKey)}
         />
       ))}
 
@@ -3391,6 +3615,7 @@ function RouteField({
         focus={focus}
         idle={focus == null}
         active={arrived}
+        manual={manual}
       />
     </group>
   );
@@ -3401,13 +3626,19 @@ function RouteField({
 function EmbedField({
   embed,
   onInspect,
+  onCenter,
   onArrive,
   splashCentroid,
+  selKey,
+  playKey,
 }: {
   embed: EmbedResponse;
   onInspect: (n: TrackNode | null) => void;
+  onCenter: (world: THREE.Vector3) => void;
   onArrive: () => void;
   splashCentroid: THREE.Vector3 | null;
+  selKey: string | null;
+  playKey: string | null;
 }) {
   // Freeze the splash centroid at mount. It lives in a ref on the parent that
   // the idle field updates asynchronously once a fresh sample loads — and when
@@ -3475,6 +3706,9 @@ function EmbedField({
           glow={0.55}
           label={{ name: n.name, artist: n.artist }}
           onPick={() => onInspect(n)}
+          onCenter={onCenter}
+          selected={matchKey(n, selKey)}
+          playing={matchKey(n, playKey)}
         />
       ))}
       <Endpoint node={T} label="Track" />
@@ -3571,6 +3805,74 @@ function RouteFlyIn({
   return null;
 }
 
+// Double-click a dot → glide the orbit pivot (and dolly the camera) to that
+// track, so the next thing you orbit around is it. A one-shot tween that hands
+// control straight back: OrbitControls stays live, so it never fights the user;
+// it just leaves the target parked on the picked dot. `req.nonce` retriggers
+// even when the same dot is double-clicked again.
+function CameraFocus({
+  req,
+}: {
+  req: { p: [number, number, number]; nonce: number } | null;
+}) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as {
+    target: THREE.Vector3;
+    update: () => void;
+  } | null;
+  const anim = useRef<{
+    fromCam: THREE.Vector3;
+    goalCam: THREE.Vector3;
+    fromT: THREE.Vector3;
+    goalT: THREE.Vector3;
+    t: number;
+  } | null>(null);
+  const lastNonce = useRef(0);
+
+  useEffect(() => {
+    if (!req || req.nonce === lastNonce.current) return;
+    lastNonce.current = req.nonce;
+    const goalT = new THREE.Vector3(...req.p);
+    // Keep the current viewing direction AND the current zoom: re-centering onto
+    // a track preserves how close you were, so a tight exploratory zoom carries
+    // over as you hop between stars (clamped only to the orbit bounds).
+    const cur = controls ? controls.target : goalT;
+    const dir = camera.position.clone().sub(cur);
+    const dist = Math.min(Math.max(dir.length() || 14, ORBIT_MIN), ORBIT_MAX);
+    dir.normalize().multiplyScalar(dist);
+    if (prefersReducedMotion) {
+      camera.position.copy(goalT).add(dir);
+      if (controls) {
+        controls.target.copy(goalT);
+        controls.update();
+      }
+      anim.current = null;
+      return;
+    }
+    anim.current = {
+      fromCam: camera.position.clone(),
+      goalCam: goalT.clone().add(dir),
+      fromT: controls ? controls.target.clone() : goalT.clone(),
+      goalT,
+      t: 0,
+    };
+  }, [req, camera, controls]);
+
+  useFrame((_, delta) => {
+    const a = anim.current;
+    if (!a) return;
+    a.t = Math.min(1, a.t + delta / 0.9);
+    const e = easeInOutCubic(a.t);
+    camera.position.lerpVectors(a.fromCam, a.goalCam, e);
+    if (controls) {
+      controls.target.lerpVectors(a.fromT, a.goalT, e);
+      controls.update();
+    }
+    if (a.t >= 1) anim.current = null;
+  });
+  return null;
+}
+
 function WebLines({
   positions,
   color = "#3a4670",
@@ -3603,17 +3905,28 @@ function PathNode({
   focused,
   onFocus,
   onInspect,
+  onCenter,
+  selected = false,
+  playing = false,
 }: {
   node: TrackNode;
   index: number;
   focused: boolean;
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
+  onCenter?: (world: THREE.Vector3) => void;
+  selected?: boolean;
+  playing?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   const show = focused || hover;
   return (
     <group position={node.position}>
+      {playing ? (
+        <PlayingRing size={0.1} />
+      ) : selected ? (
+        <SelectionAura size={0.1} />
+      ) : null}
       <mesh
         onPointerOver={(e) => {
           e.stopPropagation();
@@ -3625,12 +3938,17 @@ function PathNode({
           e.stopPropagation();
           onInspect(node);
         }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          // Path stops carry world positions directly.
+          onCenter?.(new THREE.Vector3(...node.position));
+        }}
       >
         <sphereGeometry args={[show ? 0.16 : 0.1, 20, 20]} />
         <meshStandardMaterial
           color="#fff7e6"
           emissive={SIGNAL}
-          emissiveIntensity={show ? 1.6 : 0.9}
+          emissiveIntensity={show ? 1.3 : 0.75}
           roughness={0.25}
         />
       </mesh>
@@ -3642,7 +3960,7 @@ function PathNode({
             blending={THREE.AdditiveBlending}
             transparent
             depthWrite={false}
-            opacity={show ? 0.85 : 0.5}
+            opacity={show ? 0.7 : 0.4}
           />
         </sprite>
       )}
@@ -3684,11 +4002,11 @@ function Endpoint({ node, label }: { node: TrackNode; label: string }) {
         <meshStandardMaterial
           color={COOL}
           emissive={COOL}
-          emissiveIntensity={1.2}
+          emissiveIntensity={1.0}
           roughness={0.3}
         />
       </mesh>
-      <GlowDot position={[0, 0, 0]} color="#ffffff" size={0.13} glow={1.1} />
+      <GlowDot position={[0, 0, 0]} color="#ffffff" size={0.13} glow={0.85} />
       <Billboard position={[0, 0.5, 0]}>
         <Text
           fontSize={0.135}
@@ -3751,19 +4069,19 @@ function Tracer({
         <meshStandardMaterial
           color="#ffffff"
           emissive={SIGNAL}
-          emissiveIntensity={2.2}
+          emissiveIntensity={1.5}
           roughness={0.1}
         />
       </mesh>
       {haloTexture && (
-        <sprite scale={2.4}>
+        <sprite scale={2.0}>
           <spriteMaterial
             map={haloTexture}
             color={SIGNAL}
             blending={THREE.AdditiveBlending}
             transparent
             depthWrite={false}
-            opacity={0.95}
+            opacity={0.7}
           />
         </sprite>
       )}
@@ -4027,7 +4345,7 @@ const RIBBON_FRAG = /* glsl */ `
     // a thin signal spine for route identity; the body carries genre colour
     vec3 base = mix(uSignal, vCol, smoothstep(0.05, 0.4, across));
     // brightness carries listening fit
-    float bright = 0.55 + 1.0 * vFit;
+    float bright = 0.5 + 0.85 * vFit;
     // fake directional sheen so the bank catches light and reads as a tilt
     float sheen = 0.42 + 0.58 * abs(dot(normalize(vNormalW), normalize(uLightDir)));
     bright *= mix(0.72, 1.32, sheen);
@@ -4038,12 +4356,12 @@ const RIBBON_FRAG = /* glsl */ `
     float stripe = sin((vUv.x * 40.0 - tt * speed) * 6.2831853);
     float crisp = smoothstep(0.12, 0.85, vFlow);
     float chevron = smoothstep(0.35, 0.95, stripe) * crisp;
-    color += base * chevron * 0.85;
+    color += base * chevron * 0.6;
     // bright spine + feathered edges
     float spine = smoothstep(0.26, 0.0, across);
     float edgeFeather = smoothstep(1.0, 0.6, across);
-    color += uSignal * spine * 0.55;
-    float alpha = (0.26 + 0.5 * edgeFeather + 0.32 * spine) * uFade;
+    color += uSignal * spine * 0.4;
+    float alpha = (0.22 + 0.5 * edgeFeather + 0.32 * spine) * uFade;
     gl_FragColor = vec4(color, alpha);
   }
 `;
@@ -4165,7 +4483,7 @@ function WarpRibbon({
             color={wColor(r.sign)}
             lineWidth={2.6}
             transparent
-            opacity={0.95}
+            opacity={0.85}
           />
         </group>
       ))}
@@ -4179,11 +4497,16 @@ function FocusRig({
   focus,
   idle,
   active,
+  manual,
 }: {
   pathPts: THREE.Vector3[];
   focus: number | null;
   idle: boolean;
   active: boolean;
+  // While the user has manually centered on a dot (double-click), stand down so
+  // we don't drag the camera back to the journey. Released on void-click / a new
+  // focus / a new route (see Scene).
+  manual: React.MutableRefObject<boolean>;
 }) {
   const controls = useThree((s) => s.controls) as unknown as {
     target: THREE.Vector3;
@@ -4197,7 +4520,7 @@ function FocusRig({
   }, [pathPts]);
   const goal = useRef(new THREE.Vector3());
   useFrame(() => {
-    if (!active || !controls) return;
+    if (!active || !controls || manual.current) return;
     const target =
       focus != null && pathPts[focus]
         ? goal.current.copy(pathPts[focus])
