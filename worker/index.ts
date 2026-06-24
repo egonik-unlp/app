@@ -857,6 +857,11 @@ export default {
       }
     }
 
+    // Friendly top-level aliases for the API docs — people reach for /docs, not
+    // /api/docs. The Swagger UI still loads its spec from /api/openapi.json.
+    if (url.pathname === "/docs") return htmlResponse(SWAGGER_HTML);
+    if (url.pathname === "/openapi.json") return json(openApiSpec(url.origin));
+
     // static assets (SPA)
     return env.ASSETS.fetch(request);
   },
