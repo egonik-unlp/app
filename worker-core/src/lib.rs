@@ -369,22 +369,16 @@ pub fn route(
             }
         }
 
-        // Positions in [path..., cloud..., start, end] order. With a baked layout
-        // they come from the shared global space (so the route sits where its
-        // tracks actually live, alongside the splash); otherwise a local PCA.
-        let pos: Vec<[f32; 3]> = if st.layout.is_some() {
-            let mut v = Vec::with_capacity(path.len() + cloud.len() + 2);
-            for &pid in &path {
-                v.push(layout_pos(st, pid).unwrap());
-            }
-            for &pid in &cloud {
-                v.push(layout_pos(st, pid).unwrap());
-            }
-            // requested endpoints sit at their snapped/exact anchor's layout coord
-            v.push(layout_pos(st, start_row).unwrap());
-            v.push(layout_pos(st, end_row).unwrap());
-            v
-        } else {
+        // Positions in [path..., cloud..., start, end] order. Routes use a
+        // path-anchored local PCA (axes derived from the path vectors only) so
+        // the traced path reads as a coherent thread rather than folding into
+        // crossings — unlike the shared global t-SNE layout, which preserves
+        // local clusters but distorts a path's long bridging edges. The cloud
+        // and endpoints ride along in the same path-defined frame. (Splash and
+        // explore still use the baked global layout for a stable galaxy.)
+        // `w4` is the 4th principal coordinate per node — the dimension the 3-D
+        // map discards — surfaced for the optional "4th-dimension shadow".
+        let (pos, w4): (Vec<[f32; 3]>, Vec<f32>) = {
             let mut vectors: Vec<&[f32]> = Vec::with_capacity(path.len() + cloud.len() + 2);
             for &pid in &path {
                 vectors.push(c.vec_at(pid));
@@ -394,7 +388,7 @@ pub fn route(
             }
             vectors.push(start_vec);
             vectors.push(end_vec);
-            pca::project3d(&vectors, c.dim)
+            pca::project4d_anchored(&vectors, c.dim, path.len())
         };
 
         let node = |row: usize, idx: usize| -> Value {
@@ -410,6 +404,7 @@ pub fn route(
                 "spotify_url": spotify_url(&m.uri),
                 "fit": c.fit[row] as f64,
                 "position": [p[0], p[1], p[2]],
+                "w": w4[idx],
                 "kind": "path",
             })
         };
@@ -475,6 +470,65 @@ pub fn route(
             "edges": edges,
             "req_start_pos": [start_pos[0], start_pos[1], start_pos[2]],
             "req_end_pos": [end_pos[0], end_pos[1], end_pos[2]],
+        })
+        .to_string())
+    })
+}
+
+/// Single-track explorer: the anchor's neighborhood (its nearest neighbors) in
+/// the shared layout, so the UI can show how one track sits in the embedding
+/// space. Returns the anchor's position + a cloud of neighbor nodes (each with
+/// its cosine distance to the anchor). Mirrors `route`'s positioning: layout
+/// coords when baked, else a local PCA of anchor + cloud.
+#[wasm_bindgen]
+pub fn embed_track(anchor_row: usize, k_neighbors: usize) -> Result<String, JsValue> {
+    with_state(|st| {
+        let c = &st.corpus;
+        if anchor_row >= c.n {
+            return Err(err("anchor row out of range"));
+        }
+        let want = k_neighbors.clamp(1, 60);
+        let cloud: Vec<usize> = c
+            .neighbors(anchor_row)
+            .into_iter()
+            .map(|(nbr, _)| nbr)
+            .filter(|&r| r != anchor_row)
+            .take(want)
+            .collect();
+
+        let rows: Vec<usize> = std::iter::once(anchor_row).chain(cloud.iter().copied()).collect();
+        let pos: Vec<[f32; 3]> = if st.layout.is_some() {
+            rows.iter().map(|&r| layout_pos(st, r).unwrap()).collect()
+        } else {
+            let vectors: Vec<&[f32]> = rows.iter().map(|&r| c.vec_at(r)).collect();
+            pca::project3d(&vectors, c.dim)
+        };
+
+        let cloud_json: Vec<Value> = cloud
+            .iter()
+            .enumerate()
+            .map(|(i, &row)| {
+                let m = &c.meta[row];
+                let p = pos[i + 1];
+                json!({
+                    "id": c.ids[row].to_string(),
+                    "uri": m.uri,
+                    "name": m.name,
+                    "artist": m.artist,
+                    "album": m.album,
+                    "genre": m.genre,
+                    "spotify_url": spotify_url(&m.uri),
+                    "fit": c.fit[row] as f64,
+                    "position": [p[0], p[1], p[2]],
+                    "dist": c.cos_dist(anchor_row, row),
+                    "kind": "cloud",
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "pos": [pos[0][0], pos[0][1], pos[0][2]],
+            "cloud": cloud_json,
         })
         .to_string())
     })

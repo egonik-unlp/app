@@ -19,6 +19,7 @@ import {
   project_and_snap,
   search as corpusSearch,
   sample_field,
+  embed_track,
 } from "../worker-core/pkg/worker_core.js";
 import wasmModule from "../worker-core/pkg/worker_core_bg.wasm";
 
@@ -188,12 +189,21 @@ function cleanTitle(name: string): string {
   return t || name.trim();
 }
 
+// Bypass Cloudflare's subrequest cache for the preview lookups: Deezer's search
+// response embeds the short-lived signed preview URL, so a cached search result
+// hands back a long-dead token. A unique cache-buster param makes every lookup
+// URL distinct, so it always hits the upstream fresh instead of the edge cache.
+function noCache(u: URL): RequestInit {
+  u.searchParams.set("_cb", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  return { headers: UA, cf: { cacheTtl: 0 } } as RequestInit;
+}
+
 async function deezerPreview(query: string): Promise<string | null> {
   const url = new URL("https://api.deezer.com/search");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", "1");
   try {
-    const r = await fetchRetry(url, { headers: UA });
+    const r = await fetchRetry(url, noCache(url));
     if (!r.ok) return null;
     const data = (await r.json()) as { data?: { preview?: string }[] };
     return data.data?.[0]?.preview || null;
@@ -208,7 +218,7 @@ async function itunesPreview(term: string): Promise<string | null> {
   url.searchParams.set("entity", "song");
   url.searchParams.set("limit", "1");
   try {
-    const r = await fetchRetry(url, { headers: UA });
+    const r = await fetchRetry(url, noCache(url));
     if (!r.ok) return null;
     const data = (await r.json()) as { results?: { previewUrl?: string }[] };
     return data.results?.[0]?.previewUrl ?? null;
@@ -417,6 +427,17 @@ async function buildRoute(env: Env, payload: any, hasProjector: boolean) {
   };
 }
 
+// ---- /api/embed ------------------------------------------------------------
+// Single-track explorer: resolve one track (corpus or cold-start) and return it
+// plus its neighborhood in the shared layout space.
+async function buildEmbed(env: Env, payload: any, hasProjector: boolean) {
+  const uri = payload.uri;
+  if (!uri) throw new ApiError(400, "uri is required");
+  const resolved = await resolveEndpoint(env, uri, hasProjector);
+  const emb = JSON.parse(embed_track(resolved.anchorRow, 40));
+  return { track: requestedNode(resolved, emb.pos), cloud: emb.cloud };
+}
+
 // ---- HTTP plumbing ---------------------------------------------------------
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -457,24 +478,64 @@ export default {
           const artist = (url.searchParams.get("artist") ?? "").trim();
           const track = (url.searchParams.get("track") ?? "").trim();
           if (!track && !artist) return json({ preview_url: null, source: "none" });
-          // cache key is versioned (v2) so older poisoned `null`s are bypassed.
+          // Deezer signs preview URLs with a SHORT-LIVED token (~15 min) in the
+          // `exp` query param. The whole point of failure was that the signed URL
+          // got cached far longer than the token lives, so dead (403) links were
+          // served — "songs don't play". Defenses, in order:
+          //   1. key bumped to v4 so every poisoned earlier entry is abandoned;
+          //   2. on a cache HIT, re-validate the token and refetch if it's expired
+          //      (caches.default is shared across our Workers and Cloudflare can
+          //      serve entries past their max-age, so TTL alone isn't enough);
+          //   3. the CLIENT response is `no-store`, so neither the browser nor any
+          //      edge re-caches the signed URL keyed by request URL;
+          //   4. the Deezer/iTunes lookups themselves bypass the subrequest cache
+          //      (see noCache) so a refetch is always a genuinely fresh token.
           const cache = caches.default;
           const key = new Request(
-            `https://pf.cache/preview-v2?a=${encodeURIComponent(artist.toLowerCase())}&t=${encodeURIComponent(
+            `https://pf.cache/preview-v4?a=${encodeURIComponent(artist.toLowerCase())}&t=${encodeURIComponent(
               track.toLowerCase(),
             )}`,
           );
+          const nowS = () => Math.floor(Date.now() / 1000);
+          const tokenValid = (u: string | null | undefined): boolean => {
+            if (!u) return true; // a cached `null` (miss) is fine to serve
+            const m = /[?&]exp=(\d+)/.exec(u);
+            if (!m) return true; // no expiry token (e.g. iTunes) → stable
+            return parseInt(m[1], 10) - nowS() > 60;
+          };
+
+          let found: { preview_url: string | null; source: string } | null = null;
           const hit = await cache.match(key);
-          if (hit) return hit;
-          const found = await lookupPreview(artist, track);
-          // hits never change → cache hard; misses may be a transient upstream
-          // failure → cache briefly so they recover instead of sticking for a day.
-          const ttl = found.preview_url ? 86400 : 600;
-          const res = new Response(JSON.stringify(found), {
-            headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${ttl}`, ...CORS },
+          if (hit) {
+            try {
+              const cached = (await hit.json()) as { preview_url: string | null; source: string };
+              if (tokenValid(cached.preview_url)) found = cached;
+            } catch {
+              /* unparseable hit → refetch */
+            }
+          }
+          if (!found) {
+            found = await lookupPreview(artist, track);
+            let ttl: number;
+            if (!found.preview_url) {
+              ttl = 600;
+            } else {
+              const m = /[?&]exp=(\d+)/.exec(found.preview_url);
+              ttl = m ? Math.max(60, parseInt(m[1], 10) - nowS() - 60) : 86400;
+            }
+            ctx.waitUntil(
+              cache.put(
+                key,
+                new Response(JSON.stringify(found), {
+                  headers: { "Content-Type": "application/json", "Cache-Control": `max-age=${ttl}`, ...CORS },
+                }),
+              ),
+            );
+          }
+          // never let the short-lived signed URL be cached downstream of us
+          return new Response(JSON.stringify(found), {
+            headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS },
           });
-          ctx.waitUntil(cache.put(key, res.clone()));
-          return res;
         }
         if (url.pathname === "/api/sample" && request.method === "GET") {
           // A random subspace of the corpus for the idle/splash field: a coherent
@@ -510,6 +571,10 @@ export default {
         if (url.pathname === "/api/route" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
           return json(await buildRoute(env, payload, state.hasProjector));
+        }
+        if (url.pathname === "/api/embed" && request.method === "POST") {
+          const payload = await request.json().catch(() => ({}));
+          return json(await buildEmbed(env, payload, state.hasProjector));
         }
         return json({ error: "not found" }, 404);
       } catch (e: any) {

@@ -2,6 +2,11 @@ name = "spotify-pathfinder-visualizer"
 main = "worker/index.ts"
 compatibility_date = "2026-06-10"
 
+# Workers Logs — capture console output and request metadata, viewable in the
+# Cloudflare dashboard and via `wrangler tail`.
+[observability]
+enabled = true
+
 # NOTE: this account is on the Workers Free plan (~10 ms CPU/request). A* over the
 # 23k-track graph can exceed that for far-apart pairs (→ 503). Alternatives are
 # therefore opt-in (a toggle) and best-effort. On Workers Paid, add:

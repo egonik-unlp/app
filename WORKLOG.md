@@ -191,3 +191,54 @@ in an offline build step that bakes the corpus into static files.
 ### `.env`
 - Copied `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` from
   `../spotify-predict-engagement/.env` into `app/.env` and `app/.dev.vars`.
+
+## Mobile responsive pass (2026-06-16)
+
+Made the app genuinely usable on phones while keeping the 3D map the hero and the
+desktop layout untouched. Touched only `src/main.tsx` + `src/styles.css`.
+
+### What changed
+- **Bottom-sheet composer (≤760px).** The always-expanded top control bar was
+  crushing the map on small screens. The top bar now shows brand + a compact
+  trigger that summarises the current pick ("Trace a journey…" → "A → B", or
+  "Edit" once a route exists); tapping it slides up a bottom sheet with the mode
+  switch, From/To pickers, **inline** route options, and a full-width Trace
+  button. `useMediaQuery('(max-width:760px)')` drives both the JSX (inline
+  options vs. desktop popover) and the CSS, so the two never disagree.
+- **Tablet (761–1024px)** keeps the inline bar but stacks + wraps it.
+- **Strip / inspector / legend** become safe-area-padded bottom docks/sheets;
+  the legend (previously `display:none` on mobile) is restored as a floating
+  panel — color is never the only signal, so it must stay reachable.
+
+### Decisions (per request to document them)
+1. **Composer pattern = bottom sheet** (user-approved). Search results in the
+   sheet **flip upward** (`.menu { bottom: 100% }`) because the field sits low;
+   opening downward would collide with the on-screen keyboard.
+2. **Scrim / stacking.** The sheet lives inside `.topbar`, which forms a stacking
+   context. With the default order the dismiss scrim (z50, a sibling) painted
+   *over* the sheet — the reported "greyed out + tap-hides" bug. Fix: the mobile
+   `.topbar` is raised to **z-index 70** (above the scrim), so the whole bar +
+   sheet sit above it. Trade-off: the small top trigger isn't dimmed by the scrim
+   while the sheet is open — accepted as cosmetic.
+3. **Intro copy** is trimmed on mobile (`compact` prop) and repositioned to the
+   lower third so it no longer covers the central splash dot-cloud.
+4. **Splash dot tap → Inspector.** The idle cloud auto-rotates, which broke
+   r3f's raycast `onClick` (different dot under the cursor at press vs. release);
+   the old `hoveredRef` + DOM-click workaround only flashed the 3D label on touch.
+   `GlowDot` now **captures the pointer on press** and opens on a tap (movement
+   < 12px). Tapping a splash track opens the existing **Inspector** — for a
+   sample track that's already the lighter, reasons-free card, i.e. the
+   "intermediate" view between a name tooltip and a full route-stop breakdown.
+   Trade-off: you can no longer *start* a camera-rotate drag from directly on top
+   of a dot (the dot captures the press) — negligible given dot size; accepted.
+
+### Verified
+- `tsc -b` + `vite build` clean. Drove headless Chrome over CDP at 390 / 834 /
+  1440 px: idle, composer sheet (confirmed the From field — not the scrim — is the
+  topmost element at its centre), route, inspector, legend; desktop unchanged.
+  Splash-dot tap confirmed to open the Inspector.
+
+### Known residual risk
+- **iOS soft keyboard.** A bottom-anchored sheet can be partially covered by the
+  iOS keyboard while typing in a picker. Mitigated by flipping the results menu
+  upward; not reproducible in headless. Worth a real-device check.

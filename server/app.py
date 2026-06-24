@@ -733,15 +733,23 @@ def exact_or_nearest(g: TrackGraph, meta: dict[str, Any], vector: np.ndarray) ->
 
 
 def local_positions(g: TrackGraph, vectors: dict[str, np.ndarray]) -> dict[str, list[float]]:
+    # Path-anchored PCA: derive the frame (mean, axes, scale) from the route's
+    # path vectors only, then project everything into it, so the path renders as
+    # a coherent thread instead of folding into crossings. When no "path:" keys
+    # are present (splash / explore), this is plain local PCA over all vectors.
     keys = list(vectors.keys())
     mat = np.vstack([vectors[k] for k in keys]).astype(np.float32)
-    centered = mat - mat.mean(axis=0, keepdims=True)
-    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    anchor = np.array([k.startswith("path:") for k in keys])
+    if not anchor.any():
+        anchor = np.ones(len(keys), dtype=bool)
+    mean = mat[anchor].mean(axis=0, keepdims=True)
+    centered = mat - mean
+    _, _, vt = np.linalg.svd(centered[anchor], full_matrices=False)
     axes = vt[: min(3, vt.shape[0])]
     coords = centered @ axes.T
     if coords.shape[1] < 3:
         coords = np.pad(coords, ((0, 0), (0, 3 - coords.shape[1])))
-    scale = np.percentile(np.linalg.norm(coords, axis=1), 90)
+    scale = np.percentile(np.linalg.norm(coords[anchor], axis=1), 90)
     scale = float(scale if scale > 1e-6 else 1.0)
     coords = coords / scale * 8.0
     return {k: [float(x) for x in coords[i, :3]] for i, k in enumerate(keys)}
