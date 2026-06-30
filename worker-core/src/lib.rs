@@ -6,12 +6,15 @@
 pub mod pathfind;
 pub mod pca;
 pub mod project;
+pub mod scorer;
 pub mod snapshot;
 pub mod transit;
 
+use pathfind::EndSpec;
 use project::Projector;
+use scorer::Scorer;
 use serde_json::{json, Value};
-use snapshot::Corpus;
+use snapshot::{Corpus, Meta};
 use std::cell::RefCell;
 use transit::TransitionModel;
 use wasm_bindgen::prelude::*;
@@ -26,6 +29,9 @@ struct State {
     corpus: Corpus,
     transitions: Option<TransitionModel>,
     projector: Option<Projector>,
+    // Live rotation-fit model for cold-start tracks (off-corpus). Optional: when
+    // absent, off-corpus endpoints fall back to a null fit.
+    scorer: Option<Scorer>,
     // Baked global 3D layout (t-SNE), flat row-major n*3. When present, every view
     // (splash sample + route) reads positions from here so they share one space.
     layout: Option<Vec<f32>>,
@@ -52,6 +58,7 @@ pub fn load_corpus(corpus_bytes: &[u8], transitions_bytes: &[u8]) -> Result<(), 
             corpus,
             transitions,
             projector: None,
+            scorer: None,
             layout: None,
         });
     });
@@ -64,6 +71,17 @@ pub fn set_projector(bytes: &[u8]) -> Result<(), JsValue> {
     STATE.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
             st.projector = Some(p);
+        }
+    });
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn set_scorer(bytes: &[u8]) -> Result<(), JsValue> {
+    let sc = Scorer::parse(bytes).map_err(err)?;
+    STATE.with(|s| {
+        if let Some(st) = s.borrow_mut().as_mut() {
+            st.scorer = Some(sc);
         }
     });
     Ok(())
@@ -120,6 +138,7 @@ pub fn info() -> Result<String, JsValue> {
             "k": st.corpus.k,
             "has_transitions": st.transitions.is_some(),
             "has_projector": st.projector.is_some(),
+            "has_scorer": st.scorer.is_some(),
             "has_layout": st.layout.is_some(),
             "text_model": st.projector.as_ref().map(|p| p.text_model()),
         })
@@ -314,6 +333,32 @@ pub fn project_and_snap(text_emb: &[f32], meta_json: &str) -> Result<String, JsV
     })
 }
 
+/// Live rotation-fit for an off-corpus track: featurize `latent` (the projected
+/// 64-dim song-AE vector) + `meta_json` (raw Spotify/ReccoBeats fields) and run
+/// the fit model. Returns the RAW score (post nan_to_num + clip); the Worker
+/// rescales it onto the baked [0,1] fit range using the corpus bounds in
+/// manifest.json. Errors if no scorer was loaded.
+#[wasm_bindgen]
+pub fn score_cold(latent: &[f32], meta_json: &str) -> Result<f32, JsValue> {
+    with_state(|st| {
+        let sc = st.scorer.as_ref().ok_or_else(|| err("fit scorer unavailable"))?;
+        let meta: Value = serde_json::from_str(meta_json).map_err(|e| err(e.to_string()))?;
+        sc.score(latent, &meta).map_err(err)
+    })
+}
+
+/// Baked fit score for an in-corpus row (already normalized to [0,1]).
+#[wasm_bindgen]
+pub fn fit_at(row: usize) -> Result<f32, JsValue> {
+    with_state(|st| {
+        st.corpus
+            .fit
+            .get(row)
+            .copied()
+            .ok_or_else(|| err("row out of range"))
+    })
+}
+
 #[wasm_bindgen]
 pub fn route(
     start_row: usize,
@@ -477,6 +522,241 @@ pub fn route(
     })
 }
 
+/// Like `route`, but either endpoint may be **off-map**. Pass `row < 0` to route
+/// from/to a virtual node built from its projected `vec`, live `fit`, and
+/// `meta_json` (`{uri,name,artist,album,genre}`); the off-map track then becomes
+/// a real first/last stop on the path — threaded through its *own* nearest
+/// corpus neighbors (computed via `knn_vec`) — instead of being snapped to a
+/// single anchor. A `row >= 0` endpoint is an ordinary corpus row and its
+/// vec/fit/meta args are ignored. The response shape is identical to `route`
+/// (off-map endpoints simply appear as `path[0]`/`path[last]`, and there are no
+/// `snap` edges). On `no_path` the Worker falls back to the snapped `route`.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn route_open(
+    start_row: i32,
+    start_vec: &[f32],
+    start_fit: f32,
+    start_meta_json: &str,
+    end_row: i32,
+    end_vec: &[f32],
+    end_fit: f32,
+    end_meta_json: &str,
+    length: i32,
+    tod: &str,
+    shuffle: &str,
+) -> Result<String, JsValue> {
+    with_state(|st| {
+        let c = &st.corpus;
+        let length = (length.max(4).min(50)) as usize;
+
+        let start_virtual = start_row < 0;
+        let end_virtual = end_row < 0;
+        if !start_virtual && start_row as usize >= c.n {
+            return Err(err("start anchor row out of range"));
+        }
+        if !end_virtual && end_row as usize >= c.n {
+            return Err(err("end anchor row out of range"));
+        }
+
+        // Parse off-map metadata and compute each off-map endpoint's KNN into
+        // the corpus up front; these own the data the EndSpec borrows/holds.
+        let start_meta: Option<Meta> = if start_virtual {
+            if start_vec.len() != c.dim {
+                return Err(err("off-map start vec dim mismatch"));
+            }
+            Some(serde_json::from_str(start_meta_json).map_err(|e| err(format!("off-map start meta: {e}")))?)
+        } else {
+            None
+        };
+        let end_meta: Option<Meta> = if end_virtual {
+            if end_vec.len() != c.dim {
+                return Err(err("off-map end vec dim mismatch"));
+            }
+            Some(serde_json::from_str(end_meta_json).map_err(|e| err(format!("off-map end meta: {e}")))?)
+        } else {
+            None
+        };
+        let start_knn = if start_virtual { c.knn_vec(start_vec, c.k) } else { Vec::new() };
+        let end_knn = if end_virtual { c.knn_vec(end_vec, c.k) } else { Vec::new() };
+
+        let start_spec = if start_virtual {
+            EndSpec::Virtual {
+                vec: start_vec,
+                fit: start_fit as f64,
+                meta: start_meta.clone().unwrap(),
+                knn: start_knn.clone(),
+            }
+        } else {
+            EndSpec::Corpus(start_row as usize)
+        };
+        let end_spec = if end_virtual {
+            EndSpec::Virtual {
+                vec: end_vec,
+                fit: end_fit as f64,
+                meta: end_meta.clone().unwrap(),
+                knn: end_knn.clone(),
+            }
+        } else {
+            EndSpec::Corpus(end_row as usize)
+        };
+
+        let model = st.transitions.as_ref();
+        let ctx = model.map(|m| {
+            let tod = if tod == "any" { "" } else { tod };
+            let shuffle = if shuffle == "any" { "" } else { shuffle };
+            m.resolve_context(tod, shuffle)
+        });
+
+        // Off-map endpoints are stops too, so the corpus interior targets
+        // `length` minus the virtual endpoint count (a corpus endpoint already
+        // sits inside the corpus path). With zero virtuals this is `length`.
+        let n_virtual = (start_virtual as usize) + (end_virtual as usize);
+        let interior_target = length.saturating_sub(n_virtual).max(2);
+
+        let corpus_path = pathfind::find_path_open(
+            c,
+            &start_spec,
+            &end_spec,
+            interior_target,
+            MAX_EXPANSIONS,
+            model,
+            ctx.as_ref(),
+        )
+        .ok_or_else(|| err("no_path"))?;
+        let corpus_path = if corpus_path.len() < interior_target {
+            pathfind::densify(c, corpus_path, interior_target, model, ctx.as_ref())
+        } else {
+            corpus_path
+        };
+
+        // Ordered route descriptors: [off-map start?] ++ corpus rows ++ [off-map
+        // end?]. Corpus endpoints are already the first/last of the corpus path,
+        // so they are not re-added.
+        let mut ids: Vec<String> = Vec::new();
+        let mut metas: Vec<Meta> = Vec::new();
+        let mut fits: Vec<f64> = Vec::new();
+        let mut vecs: Vec<&[f32]> = Vec::new();
+        if start_virtual {
+            let m = start_meta.as_ref().unwrap();
+            ids.push(m.uri.clone());
+            metas.push(m.clone());
+            fits.push(start_fit as f64);
+            vecs.push(start_vec);
+        }
+        for &r in &corpus_path {
+            ids.push(c.ids[r].to_string());
+            metas.push(c.meta[r].clone());
+            fits.push(c.fit[r] as f64);
+            vecs.push(c.vec_at(r));
+        }
+        if end_virtual {
+            let m = end_meta.as_ref().unwrap();
+            ids.push(m.uri.clone());
+            metas.push(m.clone());
+            fits.push(end_fit as f64);
+            vecs.push(end_vec);
+        }
+        let n_path = ids.len();
+
+        // cloud: the off-map endpoints' nearest rows (so the composer can gather
+        // around the real endpoints) plus up to 12 neighbors per corpus stop,
+        // capped at 150 — matching `route`.
+        let mut cloud: Vec<usize> = Vec::new();
+        let mut seen: std::collections::HashSet<usize> = corpus_path.iter().copied().collect();
+        for &(r, _) in start_knn.iter().chain(end_knn.iter()) {
+            if cloud.len() >= 150 {
+                break;
+            }
+            if seen.insert(r) {
+                cloud.push(r);
+            }
+        }
+        'outer: for &pid in &corpus_path {
+            for (nbr, _) in c.neighbors(pid).into_iter().take(12) {
+                if seen.insert(nbr) {
+                    cloud.push(nbr);
+                }
+                if cloud.len() >= 150 {
+                    break 'outer;
+                }
+            }
+        }
+
+        // Path-anchored PCA over [descriptors..., cloud...] (axes from the path).
+        let mut all_vecs: Vec<&[f32]> = Vec::with_capacity(n_path + cloud.len());
+        all_vecs.extend_from_slice(&vecs);
+        for &r in &cloud {
+            all_vecs.push(c.vec_at(r));
+        }
+        let (pos, w4) = pca::project4d_anchored(&all_vecs, c.dim, n_path);
+
+        // Per-hop justification between consecutive descriptors (same terms as
+        // the A* cost), generalized so off-map endpoints work too.
+        let why_for = |i: usize| -> Value {
+            if i == 0 {
+                return Value::Null;
+            }
+            let (a, b) = (i - 1, i);
+            let transition = model
+                .map(|m| Value::from(m.affinity(&metas[a], &metas[b])))
+                .unwrap_or(Value::Null);
+            let context = match (model, ctx.as_ref()) {
+                (Some(m), Some(cx)) => Value::from(m.context_fit(&metas[b], cx)),
+                _ => Value::Null,
+            };
+            json!({
+                "dist": cos_dist_slices(vecs[a], vecs[b]),
+                "fit": fits[b],
+                "genre_jump": metas[a].genre != metas[b].genre,
+                "prev_genre": metas[a].genre,
+                "transition": transition,
+                "context": context,
+            })
+        };
+
+        let path_json: Vec<Value> = (0..n_path)
+            .map(|i| {
+                let mut v = node_json(&ids[i], &metas[i], fits[i], pos[i], w4[i], "path");
+                if let Value::Object(ref mut map) = v {
+                    map.insert("why".into(), why_for(i));
+                }
+                v
+            })
+            .collect();
+        let cloud_json: Vec<Value> = cloud
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| {
+                node_json(
+                    &c.ids[r].to_string(),
+                    &c.meta[r],
+                    c.fit[r] as f64,
+                    pos[n_path + i],
+                    w4[n_path + i],
+                    "cloud",
+                )
+            })
+            .collect();
+        let edges: Vec<Value> = ids
+            .windows(2)
+            .map(|w| json!({"from": w[0], "to": w[1], "kind": "path"}))
+            .collect();
+        let start_pos = pos[0];
+        let end_pos = pos[n_path - 1];
+
+        Ok(json!({
+            "context": ctx.as_ref().map(|c| c.label.clone()),
+            "path": path_json,
+            "cloud": cloud_json,
+            "edges": edges,
+            "req_start_pos": [start_pos[0], start_pos[1], start_pos[2]],
+            "req_end_pos": [end_pos[0], end_pos[1], end_pos[2]],
+        })
+        .to_string())
+    })
+}
+
 /// Single-track explorer: the anchor's neighborhood (its nearest neighbors) in
 /// the shared layout, so the UI can show how one track sits in the embedding
 /// space. Returns the anchor's position + a cloud of neighbor nodes (each with
@@ -534,6 +814,89 @@ pub fn embed_track(anchor_row: usize, k_neighbors: usize) -> Result<String, JsVa
         })
         .to_string())
     })
+}
+
+/// Off-map single-track explorer: show the off-map track's *own* neighborhood
+/// (its nearest corpus rows via `knn_vec`) rather than snapping to an anchor and
+/// showing the anchor's. Positions come from a local PCA of [anchor, neighbors]
+/// — an off-map track has no baked layout coordinate. Same `{pos, cloud}` shape
+/// as `embed_track`.
+#[wasm_bindgen]
+pub fn embed_track_open(vec: &[f32], k_neighbors: usize) -> Result<String, JsValue> {
+    with_state(|st| {
+        let c = &st.corpus;
+        if vec.len() != c.dim {
+            return Err(err("off-map vec dim mismatch"));
+        }
+        let want = k_neighbors.clamp(1, 60);
+        let nbrs = c.knn_vec(vec, want);
+
+        let mut vectors: Vec<&[f32]> = Vec::with_capacity(nbrs.len() + 1);
+        vectors.push(vec);
+        for &(r, _) in &nbrs {
+            vectors.push(c.vec_at(r));
+        }
+        let pos = pca::project3d(&vectors, c.dim);
+
+        let cloud_json: Vec<Value> = nbrs
+            .iter()
+            .enumerate()
+            .map(|(i, &(row, dist))| {
+                let m = &c.meta[row];
+                let p = pos[i + 1];
+                json!({
+                    "id": c.ids[row].to_string(),
+                    "uri": m.uri,
+                    "name": m.name,
+                    "artist": m.artist,
+                    "album": m.album,
+                    "genre": m.genre,
+                    "spotify_url": spotify_url(&m.uri),
+                    "fit": c.fit[row] as f64,
+                    "position": [p[0], p[1], p[2]],
+                    "dist": dist,
+                    "kind": "cloud",
+                })
+            })
+            .collect();
+
+        Ok(json!({
+            "pos": [pos[0][0], pos[0][1], pos[0][2]],
+            "cloud": cloud_json,
+        })
+        .to_string())
+    })
+}
+
+// One route/cloud node as the JSON shape the frontend expects (same fields as
+// `route`'s inner `node` closure). Works for both corpus rows and off-map
+// endpoints — the caller supplies the id (corpus point id, or the track uri for
+// an off-map endpoint), metadata, fit, projected position, and kind.
+fn node_json(id: &str, m: &Meta, fit: f64, pos: [f32; 3], w: f32, kind: &str) -> Value {
+    json!({
+        "id": id,
+        "uri": m.uri,
+        "name": m.name,
+        "artist": m.artist,
+        "album": m.album,
+        "genre": m.genre,
+        "spotify_url": spotify_url(&m.uri),
+        "fit": fit,
+        "position": [pos[0], pos[1], pos[2]],
+        "w": w,
+        "kind": kind,
+    })
+}
+
+// cosine distance between two normalized latent vectors (used for the per-hop
+// `why.dist` when a hop touches an off-map endpoint that has no corpus row).
+fn cos_dist_slices(a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len().min(b.len());
+    let mut dot = 0.0f64;
+    for i in 0..n {
+        dot += (a[i] * b[i]) as f64;
+    }
+    1.0 - dot
 }
 
 fn spotify_id(uri: &str) -> String {

@@ -1,7 +1,7 @@
 //! Faithful port of pathfinder/search.py (A* + densify) and the cost weights
 //! from pathfinder/config.py. Operates on corpus row indices.
 
-use crate::snapshot::Corpus;
+use crate::snapshot::{Corpus, Meta};
 use crate::transit::{Context, TransitionModel};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -14,6 +14,65 @@ const W_CTX: f64 = 0.4;
 const GENRE_JUMP_PENALTY: f64 = 0.15;
 const MAX_CONSECUTIVE_ARTIST: usize = 2;
 const ARTIST_SHARE_DIVISOR: f64 = 4.0;
+
+// Sentinel node ids for the two off-map ("virtual") endpoints. They never enter
+// a `path` Vec — the search path stays corpus-only — so densify/violates and the
+// flat corpus arrays are never indexed by them. V_START is only ever the seed
+// node (expands to the off-map start's KNN); V_END is only ever a goal candidate
+// reachable from the off-map end's KNN rows.
+const V_END: usize = usize::MAX;
+const V_START: usize = usize::MAX - 1;
+
+/// An A* endpoint: an in-corpus `row`, or an off-map ("virtual") node carrying
+/// its own latent vector, fit, metadata, and precomputed KNN into the corpus.
+/// `Corpus`-only on both ends reproduces the original corpus↔corpus search
+/// exactly (the heuristic and costs reduce to the corpus-row forms).
+pub enum EndSpec<'a> {
+    Corpus(usize),
+    Virtual {
+        vec: &'a [f32],
+        fit: f64,
+        meta: Meta,
+        knn: Vec<(usize, f64)>,
+    },
+}
+
+/// cosine distance between two normalized vectors of equal length.
+fn cos_dist_vv(a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len().min(b.len());
+    let mut dot = 0.0f64;
+    for i in 0..n {
+        dot += (a[i] * b[i]) as f64;
+    }
+    1.0 - dot
+}
+
+// Metadata for a node, handling the two virtual sentinels. The fallthrough is
+// never reached for a sentinel unless its spec is Virtual, so c.meta is never
+// indexed out of range.
+fn vmeta<'e>(c: &'e Corpus, start: &'e EndSpec, end: &'e EndSpec, node: usize) -> &'e Meta {
+    if node == V_START {
+        if let EndSpec::Virtual { meta, .. } = start {
+            return meta;
+        }
+    } else if node == V_END {
+        if let EndSpec::Virtual { meta, .. } = end {
+            return meta;
+        }
+    }
+    &c.meta[node]
+}
+
+// Rotation-fit for a node. V_END uses the off-map end's fit; V_START is never a
+// candidate so its fit is never read.
+fn vfit(c: &Corpus, end: &EndSpec, node: usize) -> f64 {
+    if node == V_END {
+        if let EndSpec::Virtual { fit, .. } = end {
+            return *fit;
+        }
+    }
+    c.fit[node] as f64
+}
 
 fn minmax(raw: &[(usize, f64)]) -> HashMap<usize, f64> {
     let mut out = HashMap::with_capacity(raw.len());
@@ -134,18 +193,88 @@ pub fn find_path(
     model: Option<&TransitionModel>,
     ctx: Option<&Context>,
 ) -> Option<Vec<usize>> {
+    find_path_open(
+        c,
+        &EndSpec::Corpus(start),
+        &EndSpec::Corpus(end),
+        length_hint,
+        max_expansions,
+        model,
+        ctx,
+    )
+}
+
+/// A* with arbitrary endpoints (corpus rows or off-map virtual nodes). Returns
+/// the **corpus-only** path of rows; the caller prepends/appends any virtual
+/// endpoints. With two `Corpus` endpoints this is identical to the original
+/// corpus↔corpus search: `end_knn` is empty (no V_END edge), the heuristic
+/// `cos_dist_vec(node, vec_at(end))` equals `cos_dist(node, end)`, and the seed
+/// is the single start row — so the parity test still gates this code path.
+#[allow(clippy::too_many_arguments)]
+pub fn find_path_open(
+    c: &Corpus,
+    start: &EndSpec,
+    end: &EndSpec,
+    length_hint: usize,
+    max_expansions: usize,
+    model: Option<&TransitionModel>,
+    ctx: Option<&Context>,
+) -> Option<Vec<usize>> {
+    // Goal vector for the heuristic: the corpus row's vector, or the off-map
+    // latent. For a corpus end, cos_dist_vec(node, goal) == cos_dist(node, end).
+    let goal_vec: &[f32] = match end {
+        EndSpec::Corpus(r) => c.vec_at(*r),
+        EndSpec::Virtual { vec, .. } => vec,
+    };
+    let end_row: Option<usize> = match end {
+        EndSpec::Corpus(r) => Some(*r),
+        EndSpec::Virtual { .. } => None,
+    };
+    // For an off-map end: corpus rows from which it is reachable, plus the cosine
+    // distance of that closing hop. Empty for a corpus end (no V_END candidate).
+    let end_knn: HashMap<usize, f64> = match end {
+        EndSpec::Virtual { knn, .. } => knn.iter().copied().collect(),
+        EndSpec::Corpus(_) => HashMap::new(),
+    };
+    let is_goal = |nbr: usize| match end_row {
+        Some(r) => nbr == r,
+        None => nbr == V_END,
+    };
+    // h(node): cosine distance from a node's vector to the goal vector.
+    let heur = |node: usize| -> f64 {
+        match node {
+            V_END => 0.0,
+            V_START => match start {
+                EndSpec::Virtual { vec, .. } => cos_dist_vv(vec, goal_vec),
+                EndSpec::Corpus(_) => 0.0,
+            },
+            _ => c.cos_dist_vec(node, goal_vec),
+        }
+    };
+
     let mut counter: u64 = 0;
     let mut heap: BinaryHeap<HeapItem> = BinaryHeap::new();
+    let mut best_g: HashMap<usize, f64> = HashMap::new();
+
+    let start_node = match start {
+        EndSpec::Corpus(sr) => *sr,
+        EndSpec::Virtual { .. } => V_START,
+    };
+    // The seed path is corpus-only: a corpus start seeds [start]; an off-map
+    // start seeds [] and expands to corpus rows (V_START never enters the path).
+    let start_path: Vec<usize> = match start {
+        EndSpec::Corpus(sr) => vec![*sr],
+        EndSpec::Virtual { .. } => Vec::new(),
+    };
     heap.push(HeapItem {
-        f: c.cos_dist(start, end),
+        f: heur(start_node),
         counter,
         g: 0.0,
-        node: start,
-        path: vec![start],
+        node: start_node,
+        path: start_path,
     });
     counter += 1;
-    let mut best_g: HashMap<usize, f64> = HashMap::new();
-    best_g.insert(start, 0.0);
+    best_g.insert(start_node, 0.0);
 
     for _ in 0..max_expansions {
         let item = match heap.pop() {
@@ -158,33 +287,45 @@ pub fn find_path(
             path,
             ..
         } = item;
-        if node == end {
+        if is_goal(node) {
             return Some(path);
         }
         if g_cost > *best_g.get(&node).unwrap_or(&f64::INFINITY) {
             continue;
         }
-        let prev_genre = &c.meta[node].genre;
+        let prev_genre = &vmeta(c, start, end, node).genre;
 
-        let cands: Vec<(usize, f64)> = c
-            .neighbors(node)
-            .into_iter()
-            .filter(|&(nbr, _)| nbr == end || !violates(c, &path, nbr, length_hint))
-            .collect();
+        // candidates: the off-map start expands to its KNN; a corpus node uses
+        // its baked neighbors, plus the V_END closing edge when it's one of the
+        // off-map end's nearest rows. The goal is exempt from path constraints.
+        let cands: Vec<(usize, f64)> = match (node, start) {
+            (V_START, EndSpec::Virtual { knn, .. }) => knn.clone(),
+            _ => {
+                let mut v = c.neighbors(node);
+                if let Some(&d) = end_knn.get(&node) {
+                    v.push((V_END, d));
+                }
+                v
+            }
+        }
+        .into_iter()
+        .filter(|&(nbr, _)| is_goal(nbr) || !violates(c, &path, nbr, length_hint))
+        .collect();
 
         let mut trans_n: HashMap<usize, f64> = HashMap::new();
         let mut ctx_n: HashMap<usize, f64> = HashMap::new();
         if let Some(m) = model {
             if !cands.is_empty() {
+                let prev_meta = vmeta(c, start, end, node);
                 let raw: Vec<(usize, f64)> = cands
                     .iter()
-                    .map(|&(nbr, _)| (nbr, m.affinity(&c.meta[node], &c.meta[nbr])))
+                    .map(|&(nbr, _)| (nbr, m.affinity(prev_meta, vmeta(c, start, end, nbr))))
                     .collect();
                 trans_n = minmax(&raw);
                 if let Some(cx) = ctx {
                     let raw_c: Vec<(usize, f64)> = cands
                         .iter()
-                        .map(|&(nbr, _)| (nbr, m.context_fit(&c.meta[nbr], cx)))
+                        .map(|&(nbr, _)| (nbr, m.context_fit(vmeta(c, start, end, nbr), cx)))
                         .collect();
                     ctx_n = minmax(&raw_c);
                 }
@@ -193,8 +334,8 @@ pub fn find_path(
 
         for &(nbr, dist) in &cands {
             let mut step = W_DIST * dist;
-            step += W_FIT * (1.0 - c.fit[nbr] as f64);
-            if &c.meta[nbr].genre != prev_genre {
+            step += W_FIT * (1.0 - vfit(c, end, nbr));
+            if &vmeta(c, start, end, nbr).genre != prev_genre {
                 step += W_DIV * GENRE_JUMP_PENALTY;
             }
             if !trans_n.is_empty() {
@@ -208,10 +349,13 @@ pub fn find_path(
                 continue;
             }
             best_g.insert(nbr, new_g);
+            // V_END is the goal marker only — it never enters the path.
             let mut np = path.clone();
-            np.push(nbr);
+            if nbr != V_END {
+                np.push(nbr);
+            }
             heap.push(HeapItem {
-                f: new_g + c.cos_dist(nbr, end),
+                f: new_g + heur(nbr),
                 counter,
                 g: new_g,
                 node: nbr,

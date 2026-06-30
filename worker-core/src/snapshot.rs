@@ -162,4 +162,25 @@ impl Corpus {
         }
         best
     }
+
+    /// Top-`k` corpus rows nearest an external normalized vector, as
+    /// (row, cos_dist) ascending by distance. Generalizes `snap` (k=1 argmax) —
+    /// `knn_vec(v, 1)[0].0 == snap(v)` — and costs the same full scan. Used to
+    /// give an off-corpus ("off-map") track real graph edges into the corpus
+    /// instead of collapsing it to a single snapped anchor.
+    pub fn knn_vec(&self, v: &[f32], k: usize) -> Vec<(usize, f64)> {
+        if self.n == 0 || k == 0 {
+            return Vec::new();
+        }
+        let mut all: Vec<(f64, usize)> = (0..self.n)
+            .map(|row| (self.cos_dist_vec(row, v), row))
+            .collect();
+        let take = k.min(all.len());
+        if take < all.len() {
+            all.select_nth_unstable_by(take - 1, |a, b| a.0.total_cmp(&b.0));
+            all.truncate(take);
+        }
+        all.sort_by(|a, b| a.0.total_cmp(&b.0));
+        all.into_iter().map(|(d, r)| (r, d)).collect()
+    }
 }

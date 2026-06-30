@@ -91,9 +91,63 @@ off  type          field
 Feature order (must match training): forward pass input is
 `text_emb(text_dim) ++ z(numerics) ++ z(acoustics) ++ missing_flags(acoustics) ++ genre_multihot ++ album_onehot`.
 
+## `scorer.bin`  (magic `PFS1`) — live cold-start fit
+
+A self-contained export of the rotation-fit model
+(`burn-deep-embeddings-highvocab`) + its featurize spec, so off-corpus tracks get
+a real fit value at request time (the baked `corpus.bin` `fit` only covers
+in-corpus tracks). Built by `tools/export_scorer.py` (also invoked from
+`build_snapshot.py`); loaded by the Rust core via `set_scorer` and run by
+`score_cold`. Independent of the corpus, so it can be regenerated alone.
+
+The network is a fixed graph: continuous block standardized, three categorical
+one-hot blocks embedded and concatenated, then a 2-hidden-layer MLP + softmax:
+
+```
+input[497] = cont(71) ++ onehot_genre(121) ++ onehot_artist(301) ++ onehot_album(4)
+cont       = (input[0:71] - cont_mean) / cont_std
+e_*        = onehot_block @ embed_*                 # ONNX MatMul, weights [in,out]
+h          = concat(cont, e_genre, e_artist, e_album)              # 107
+h          = relu(h @ trunk_w0 + b0); relu(h @ trunk_w1 + b1)
+raw        = softmax(h @ head_w + head_b)[class 1]   # then nan_to_num + clip(0,1)
+```
+
+`raw` is rescaled to the baked `fit` range in the Worker via `fit_raw_min/max`
+(below). The 497-vector is assembled per the `columns` spec, mirroring
+`server/app.py` `OnnxScorer.features` (`pca = (latent - pca_mean) @ pca_components.T`,
+then numeric/onehot ops; the `__other__` onehot is the unseen-value catch-all).
+
+```
+off  type        field
+0    u8[4]       magic = "PFS1"
+4    u32         version = 1
+8    u32         cfg_len
+12   u8[cfg_len] cfg_json
+     f32 blobs   # concatenated in cfg_json.blobs order
+```
+
+`cfg_json`: `{ blocks:{cont,genre,artist,album}, embed:{genre,artist,album},
+trunk:[h0,h1], n_class, class_index, pca_dims, columns:[…497 featurize specs…],
+blobs:[{name,shape}…] }`. Blob order: `pca_components[64,64]`, `pca_mean[64]`,
+`cont_mean[71]`, `cont_std[71]`, `embed_genre[121,16]`, `embed_artist[301,16]`,
+`embed_album[4,4]`, `trunk_w0[107,128]`, `trunk_b0[128]`, `trunk_w1[128,64]`,
+`trunk_b1[64]`, `head_w[64,2]`, `head_b[2]`. A re-export with a different graph
+fails loudly (the exporter asserts the ONNX op sequence + shapes).
+
+Rust↔ONNX parity is gated by `worker-core/tests/scorer.rs` against fixtures from
+the exporter (featurize < 1e-5, score < 1e-4).
+
 ## `manifest.json`
 
 ```
 { "version", "n_tracks", "dim", "knn_k", "has_projector": bool,
-  "text_model": "@cf/baai/bge-m3" | null, "built_at": "<iso>" }
+  "text_model": "@cf/baai/bge-m3" | null,
+  "fit_raw_min": float | null, "fit_raw_max": float | null,  # corpus raw-score bounds
+  "built_at": "<iso>" }
 ```
+
+`fit_raw_min`/`fit_raw_max` are the corpus-wide raw model-output bounds captured
+during scoring; the Worker uses them to place a live cold-start `raw` score on the
+same `[0,1]` scale as the baked corpus `fit` (the min-max step in
+`OnnxScorer.score_graph`). Absent in pre-existing snapshots → the Worker falls
+back to the clamped raw score until the next rebuild.

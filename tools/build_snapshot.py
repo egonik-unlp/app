@@ -271,10 +271,19 @@ def main() -> None:
         print(f"  (debug) limited to {len(g.ids)} tracks")
     print(f"loaded {len(g.ids)} tracks")
 
-    print("scoring fit (ONNX xgboost) ...")
-    scores = A.OnnxScorer(A.MODEL_DIR).score_graph(g)
+    print("scoring fit (ONNX) ...")
+    scorer = A.OnnxScorer(A.MODEL_DIR)
+    scores = scorer.score_graph(g)
 
     write_corpus(g, scores, OUT / "corpus.bin")
+
+    # scorer.bin: the same fit model + featurize spec, for live (cold-start)
+    # scoring in the Worker. Independent of the corpus, but emitted here so a
+    # single build keeps corpus fit and live fit in lock-step.
+    import tools.export_scorer as E  # noqa: PLC0415
+
+    print("exporting scorer.bin (live fit model) ...")
+    E.write_scorer_bin(E.load_params(A.MODEL_DIR), OUT / "scorer.bin")
 
     src_trans = A.TRANSITIONS_JSON
     (OUT / "transitions.json").write_bytes(src_trans.read_bytes())
@@ -292,6 +301,9 @@ def main() -> None:
         "knn_k": A.KNN_K,
         "has_projector": text_model is not None,
         "text_model": text_model,
+        # raw-score bounds used to normalize live cold-start fit onto the baked scale
+        "fit_raw_min": scorer.raw_min,
+        "fit_raw_max": scorer.raw_max,
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2))

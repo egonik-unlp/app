@@ -648,6 +648,11 @@ class OnnxScorer:
         self.session = ort.InferenceSession(str(model_dir / "model.onnx"), providers=["CPUExecutionProvider"])
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
+        # corpus-wide raw-score bounds from the last score_graph() call; the
+        # snapshot builder persists these so the Worker can place a live
+        # (off-corpus) raw score on the same [0,1] scale as the baked fit values.
+        self.raw_min: float | None = None
+        self.raw_max: float | None = None
 
     def score_graph(self, g: TrackGraph) -> dict[int, float]:
         rows = np.vstack([self.features(g.meta[pid], g.vec(pid)) for pid in g.ids]).astype(np.float32)
@@ -656,6 +661,7 @@ class OnnxScorer:
         out = np.clip(out, 0.0, 1.0)
         lo = float(out.min())
         hi = float(out.max())
+        self.raw_min, self.raw_max = lo, hi
         span = hi - lo
         norm = np.full_like(out, 0.5) if span <= 1e-12 else (out - lo) / span
         return {pid: float(norm[i]) for i, pid in enumerate(g.ids)}

@@ -10,16 +10,21 @@ import {
   initSync,
   load_corpus,
   set_projector,
+  set_scorer,
   set_layout,
   info,
   find_row,
   vec_at,
   meta_at,
+  fit_at,
   route as wasmRoute,
+  route_open as wasmRouteOpen,
   project_and_snap,
+  score_cold,
   search as corpusSearch,
   sample_field,
   embed_track,
+  embed_track_open,
 } from "../worker-core/pkg/worker_core.js";
 import wasmModule from "../worker-core/pkg/worker_core_bg.wasm";
 
@@ -43,10 +48,19 @@ const AF_KEYS = [
 ] as const;
 
 // ---- per-isolate state (warm across requests) -----------------------------
-let ready: Promise<{ hasProjector: boolean; tracks: number }> | null = null;
+interface CoreState {
+  hasProjector: boolean;
+  hasScorer: boolean;
+  tracks: number;
+  // corpus-wide raw-score bounds (from manifest.json) used to rescale a live
+  // cold-start fit onto the baked [0,1] fit range; null when unavailable.
+  fitMin: number | null;
+  fitMax: number | null;
+}
+let ready: Promise<CoreState> | null = null;
 let spotifyToken: { value: string; exp: number } | null = null;
 
-async function ensureReady(env: Env) {
+async function ensureReady(env: Env): Promise<CoreState> {
   if (!ready) {
     ready = (async () => {
       initSync({ module: wasmModule });
@@ -66,6 +80,17 @@ async function ensureReady(env: Env) {
           console.warn("projector load failed:", e);
         }
       }
+      // Live cold-start fit scorer (optional, mirrors the baked corpus fit).
+      const scorerBin = await assetBytes(env, "/data/scorer.bin");
+      let hasScorer = false;
+      if (scorerBin) {
+        try {
+          set_scorer(scorerBin);
+          hasScorer = true;
+        } catch (e) {
+          console.warn("scorer load failed:", e);
+        }
+      }
       // Baked global 3D layout — shared coordinate space for splash + route.
       const layout = await assetBytes(env, "/data/layout.bin");
       if (layout) {
@@ -75,11 +100,33 @@ async function ensureReady(env: Env) {
           console.warn("layout load failed:", e);
         }
       }
+      let fitMin: number | null = null;
+      let fitMax: number | null = null;
+      const manifest = await assetBytes(env, "/data/manifest.json");
+      if (manifest) {
+        try {
+          const m = JSON.parse(new TextDecoder().decode(manifest));
+          fitMin = typeof m.fit_raw_min === "number" ? m.fit_raw_min : null;
+          fitMax = typeof m.fit_raw_max === "number" ? m.fit_raw_max : null;
+        } catch (e) {
+          console.warn("manifest parse failed:", e);
+        }
+      }
       const inf = JSON.parse(info());
-      return { hasProjector, tracks: inf.n as number };
+      return { hasProjector, hasScorer, tracks: inf.n as number, fitMin, fitMax };
     })();
   }
   return ready;
+}
+
+// Rescale a raw cold-start fit (post nan/clip, already in [0,1]) onto the baked
+// corpus fit scale via the persisted corpus min/max. Mirrors the min-max step in
+// OnnxScorer.score_graph so a cold-start fit is comparable to corpus fit values.
+function normalizeFit(raw: number, lo: number | null, hi: number | null): number {
+  if (lo === null || hi === null) return Math.min(1, Math.max(0, raw));
+  const span = hi - lo;
+  if (span <= 1e-12) return 0.5;
+  return Math.min(1, Math.max(0, (raw - lo) / span));
 }
 
 async function assetBytes(env: Env, path: string): Promise<Uint8Array | null> {
@@ -334,15 +381,18 @@ interface Resolved {
   exact: boolean;
   snappedId: string | null;
   anchorName?: string;
+  // rotation-fit [0,1]: baked corpus value for exact tracks, live model score
+  // for cold-start tracks, null if no scorer is loaded or scoring failed.
+  fit: number | null;
 }
 
-async function resolveEndpoint(env: Env, uri: string, hasProjector: boolean): Promise<Resolved> {
+async function resolveEndpoint(env: Env, uri: string, state: CoreState): Promise<Resolved> {
   const row = find_row(uri);
   if (row >= 0) {
     const m = JSON.parse(meta_at(row));
-    return { anchorRow: row, vec: vec_at(row), display: m, exact: true, snappedId: null };
+    return { anchorRow: row, vec: vec_at(row), display: m, exact: true, snappedId: null, fit: fit_at(row) };
   }
-  if (!hasProjector) {
+  if (!state.hasProjector) {
     throw new ApiError(
       422,
       "This track isn't in the corpus and cold-start embedding is unavailable. Pick an in-corpus track (badge) or rebuild the snapshot with the projector.",
@@ -352,6 +402,18 @@ async function resolveEndpoint(env: Env, uri: string, hasProjector: boolean): Pr
   const emb = await embedText(env, contentDoc(cold));
   const r = JSON.parse(project_and_snap(emb, JSON.stringify(cold)));
   const anchorMeta = JSON.parse(meta_at(r.snap_row));
+  // Live fit: score the cold-start track from its projected latent + metadata,
+  // then place it on the baked corpus scale. Non-fatal — a scoring failure just
+  // leaves fit null.
+  let fit: number | null = null;
+  if (state.hasScorer) {
+    try {
+      const raw = score_cold(Float32Array.from(r.vec), JSON.stringify(cold));
+      fit = normalizeFit(raw, state.fitMin, state.fitMax);
+    } catch (e) {
+      console.warn("cold-start scoring failed:", e);
+    }
+  }
   return {
     anchorRow: r.snap_row,
     vec: Float32Array.from(r.vec),
@@ -365,11 +427,15 @@ async function resolveEndpoint(env: Env, uri: string, hasProjector: boolean): Pr
     exact: false,
     snappedId: r.snap_id,
     anchorName: anchorMeta.name,
+    fit,
   };
 }
 
-function requestedNode(r: Resolved, pos: number[]): any {
+// `opened` = an off-map endpoint was routed as a real node (not snapped), so it
+// carries no snap link/label — it renders like an in-corpus endpoint.
+function requestedNode(r: Resolved, pos: number[], opened = false): any {
   const uri = r.display.uri ?? "";
+  const showSnap = !r.exact && !opened;
   return {
     id: uri,
     uri,
@@ -378,22 +444,22 @@ function requestedNode(r: Resolved, pos: number[]): any {
     album: r.display.album ?? null,
     genre: r.display.genre ?? "unknown",
     spotify_url: uri ? `https://open.spotify.com/track/${spotifyIdOf(uri)}` : null,
-    fit: null,
+    fit: r.fit,
     position: pos,
     kind: "requested",
-    snapped_to: r.exact ? null : r.snappedId,
-    snapped_label: r.exact ? null : r.anchorName ?? null,
+    snapped_to: showSnap ? r.snappedId : null,
+    snapped_label: showSnap ? r.anchorName ?? null : null,
   };
 }
 
-async function buildRoute(env: Env, payload: any, hasProjector: boolean) {
+async function buildRoute(env: Env, payload: any, state: CoreState) {
   const startUri = payload.start_uri;
   const endUri = payload.end_uri;
   if (!startUri || !endUri) throw new ApiError(400, "start_uri and end_uri are required");
 
   const [start, end] = await Promise.all([
-    resolveEndpoint(env, startUri, hasProjector),
-    resolveEndpoint(env, endUri, hasProjector),
+    resolveEndpoint(env, startUri, state),
+    resolveEndpoint(env, endUri, state),
   ]);
 
   const length = Math.max(4, Math.min(50, parseInt(payload.length, 10) || 14));
@@ -401,26 +467,61 @@ async function buildRoute(env: Env, payload: any, hasProjector: boolean) {
   const tod = ctx === "any" ? "any" : ctx === "now" ? todBucket(new Date().getUTCHours()) : ctx;
   const shuffle = payload.shuffle ?? "any";
 
-  let routeJson: any;
-  try {
-    routeJson = JSON.parse(
-      wasmRoute(start.anchorRow, end.anchorRow, start.vec, end.vec, length, tod, shuffle),
-    );
-  } catch (e: any) {
-    if (String(e?.message ?? e).includes("no_path")) {
-      throw new ApiError(404, "No path found between these tracks");
+  // When an endpoint is off-map, route it as a real node (route_open) so the
+  // path begins/ends at the track itself — threaded through its own nearest
+  // corpus neighbors — rather than snapping to an anchor. Snapping stays the
+  // fallback (no_path, or both endpoints already in-corpus).
+  const offMap = !start.exact || !end.exact;
+  let routeJson: any = null;
+  let snapped = false;
+  if (offMap) {
+    try {
+      routeJson = JSON.parse(
+        wasmRouteOpen(
+          start.exact ? start.anchorRow : -1,
+          start.vec,
+          start.fit ?? 0.5,
+          JSON.stringify(start.display),
+          end.exact ? end.anchorRow : -1,
+          end.vec,
+          end.fit ?? 0.5,
+          JSON.stringify(end.display),
+          length,
+          tod,
+          shuffle,
+        ),
+      );
+    } catch (e: any) {
+      if (!String(e?.message ?? e).includes("no_path")) throw e;
+      // no real path to/from the off-map node — fall back to snapping below.
     }
-    throw e;
+  }
+  if (!routeJson) {
+    snapped = offMap; // a snap link is only meaningful when an endpoint was off-map
+    try {
+      routeJson = JSON.parse(
+        wasmRoute(start.anchorRow, end.anchorRow, start.vec, end.vec, length, tod, shuffle),
+      );
+    } catch (e: any) {
+      if (String(e?.message ?? e).includes("no_path")) {
+        throw new ApiError(404, "No path found between these tracks");
+      }
+      throw e;
+    }
   }
 
+  const opened = offMap && !snapped;
   const edges = [...routeJson.edges];
-  if (!start.exact) edges.push({ from: start.display.uri, to: start.snappedId, kind: "snap" });
-  if (!end.exact) edges.push({ from: end.snappedId, to: end.display.uri, kind: "snap" });
+  // snap edges only when we actually fell back to snapping an off-map endpoint.
+  if (snapped) {
+    if (!start.exact) edges.push({ from: start.display.uri, to: start.snappedId, kind: "snap" });
+    if (!end.exact) edges.push({ from: end.snappedId, to: end.display.uri, kind: "snap" });
+  }
 
   return {
     context: routeJson.context,
-    requested_start: requestedNode(start, routeJson.req_start_pos),
-    requested_end: requestedNode(end, routeJson.req_end_pos),
+    requested_start: requestedNode(start, routeJson.req_start_pos, opened),
+    requested_end: requestedNode(end, routeJson.req_end_pos, opened),
     path: routeJson.path,
     cloud: routeJson.cloud,
     edges,
@@ -430,12 +531,16 @@ async function buildRoute(env: Env, payload: any, hasProjector: boolean) {
 // ---- /api/embed ------------------------------------------------------------
 // Single-track explorer: resolve one track (corpus or cold-start) and return it
 // plus its neighborhood in the shared layout space.
-async function buildEmbed(env: Env, payload: any, hasProjector: boolean) {
+async function buildEmbed(env: Env, payload: any, state: CoreState) {
   const uri = payload.uri;
   if (!uri) throw new ApiError(400, "uri is required");
-  const resolved = await resolveEndpoint(env, uri, hasProjector);
-  const emb = JSON.parse(embed_track(resolved.anchorRow, 40));
-  return { track: requestedNode(resolved, emb.pos), cloud: emb.cloud };
+  const resolved = await resolveEndpoint(env, uri, state);
+  // Off-map: show the track's own neighborhood (its nearest corpus rows) instead
+  // of the snapped anchor's. In-corpus: the anchor's neighborhood, as before.
+  const emb = resolved.exact
+    ? JSON.parse(embed_track(resolved.anchorRow, 40))
+    : JSON.parse(embed_track_open(resolved.vec, 40));
+  return { track: requestedNode(resolved, emb.pos, !resolved.exact), cloud: emb.cloud };
 }
 
 // ---- HTTP plumbing ---------------------------------------------------------
@@ -505,7 +610,7 @@ function openApiSpec(origin: string) {
       album: { type: "string", nullable: true },
       genre: { type: "string" },
       spotify_url: { type: "string", nullable: true },
-      fit: { type: "number", nullable: true, description: "Listening-fit score, 0–1." },
+      fit: { type: "number", nullable: true, description: "Rotation-fit score, 0–1. Baked for in-corpus tracks; computed live (and approximate, via the cold-start latent) for off-corpus tracks; null only if no scorer is loaded." },
       w: { type: "number", description: "Hidden 4th PCA axis (ribbon bank)." },
       position: {
         type: "array",
@@ -515,7 +620,7 @@ function openApiSpec(origin: string) {
         description: "[x, y, z] in the shared layout space.",
       },
       kind: { type: "string", enum: ["path", "cloud", "requested"] },
-      snapped_to: { type: "string", nullable: true, description: "Anchor id when cold-start-snapped." },
+      snapped_to: { type: "string", nullable: true, description: "Anchor id, set only on the snap fallback (an off-corpus endpoint that could not be routed as a real node). Null when the off-corpus track was routed directly." },
       snapped_label: { type: "string", nullable: true },
     },
   };
@@ -560,7 +665,9 @@ function openApiSpec(origin: string) {
       description:
         "Traces an A* route across the taste map between two Spotify tracks and " +
         "returns it as an ordered path in a shared 3D layout space. Arbitrary " +
-        "(non-corpus) tracks are cold-start embedded and snapped to the nearest anchor.",
+        "(non-corpus) tracks are cold-start embedded and routed as real endpoints " +
+        "of the path; if no path can be found that way, they fall back to snapping " +
+        "to the nearest in-corpus anchor.",
     },
     servers: [{ url: origin }],
     paths: {
@@ -823,7 +930,7 @@ export default {
         }
         if (url.pathname === "/api/route" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
-          return json(await buildRoute(env, payload, state.hasProjector));
+          return json(await buildRoute(env, payload, state));
         }
         // GET equivalent of /api/route — shareable, curl-friendly, documented in
         // Swagger. `from`/`to` accept a bare Spotify id, a spotify:track: uri, or
@@ -844,11 +951,11 @@ export default {
             context: url.searchParams.get("ctx") ?? undefined,
             shuffle: url.searchParams.get("shuf") ?? undefined,
           };
-          return json(await buildRoute(env, payload, state.hasProjector));
+          return json(await buildRoute(env, payload, state));
         }
         if (url.pathname === "/api/embed" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
-          return json(await buildEmbed(env, payload, state.hasProjector));
+          return json(await buildEmbed(env, payload, state));
         }
         return json({ error: "not found" }, 404);
       } catch (e: any) {

@@ -1,4 +1,5 @@
 numpy
+onnx
 onnxruntime
 qdrant-client
 requests
