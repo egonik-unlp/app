@@ -12,6 +12,7 @@ import {
   Link2,
   ListMusic,
   Loader2,
+  LogIn,
   MapPin,
   Orbit,
   Pause,
@@ -77,6 +78,17 @@ type EmbedResponse = {
   cloud: TrackNode[];
 };
 
+// BYOP: what the arrange endpoint reports about the imported playlist — the
+// source name (for the saved playlist) and an honest account of anything that
+// couldn't be placed on the map. Present only on /api/arrange responses.
+type RouteSource = {
+  name: string | null;
+  placed: number;
+  requested: number;
+  truncated: number;
+  unresolved: { uri: string; reason: string }[];
+};
+
 type RouteResponse = {
   context: string | null;
   requested_start: TrackNode;
@@ -84,6 +96,7 @@ type RouteResponse = {
   path: TrackNode[];
   cloud: TrackNode[];
   edges: Edge[];
+  source?: RouteSource;
 };
 
 class ApiError extends Error {
@@ -156,7 +169,12 @@ const matchKey = (n: TrackNode, key: string | null) =>
 // ---------------------------------------------------------------------------
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
-const SPOTIFY_SCOPE = "playlist-modify-public playlist-modify-private";
+// modify: save the journey to a new playlist. read: list the listener's own
+// playlists and read their tracks for Bring-Your-Own-Playlist. Existing tokens
+// minted before the read scopes were added won't carry them until re-consent —
+// the "Connect" button re-runs the authorize flow, which requests them.
+const SPOTIFY_SCOPE =
+  "playlist-modify-public playlist-modify-private playlist-read-private playlist-read-collaborative";
 const PKCE_VERIFIER_KEY = "pf.pkce_verifier";
 const TOKEN_KEY = "pf.spotify_token";
 // Persist the traced route across the OAuth redirect (which reloads the page),
@@ -310,6 +328,52 @@ async function createJourneyPlaylist(
     );
   }
   return playlist.external_urls.spotify;
+}
+
+// BYOP: the signed-in listener's own playlists (needs playlist-read-* scope).
+// Paginates a few pages deep — enough for a picker without unbounded fetching.
+type MyPlaylist = { id: string; name: string; tracks: number; owner: string };
+type SpotifyPage = { items: any[]; next: string | null };
+async function fetchMyPlaylists(token: string): Promise<MyPlaylist[]> {
+  const out: MyPlaylist[] = [];
+  let path: string | null = "/me/playlists?limit=50";
+  for (let guard = 0; guard < 6 && path; guard += 1) {
+    const page: SpotifyPage = await spotifyApi<SpotifyPage>(token, path);
+    for (const p of page.items ?? []) {
+      if (!p?.id) continue;
+      out.push({
+        id: p.id,
+        name: p.name ?? "Untitled playlist",
+        tracks: p.tracks?.total ?? 0,
+        owner: p.owner?.display_name ?? "",
+      });
+    }
+    path = page.next ? page.next.replace("https://api.spotify.com/v1", "") : null;
+  }
+  return out;
+}
+
+// BYOP: a playlist's track uris via the user token (works for the listener's own
+// private / collaborative playlists too, unlike the client-credentials Worker
+// path). Bounded to `max` real tracks — local files and non-track items skipped.
+async function fetchPlaylistTrackUris(
+  token: string,
+  id: string,
+  max = 60,
+): Promise<string[]> {
+  const uris: string[] = [];
+  let path: string | null =
+    `/playlists/${id}/tracks?fields=items(track(uri,is_local,type)),next&limit=100`;
+  for (let guard = 0; guard < 6 && path && uris.length < max; guard += 1) {
+    const page: SpotifyPage = await spotifyApi<SpotifyPage>(token, path);
+    for (const it of page.items ?? []) {
+      const t = it?.track;
+      if (!t || t.is_local || t.type !== "track") continue;
+      if (typeof t.uri === "string" && t.uri.startsWith("spotify:track:")) uris.push(t.uri);
+    }
+    path = page.next ? page.next.replace("https://api.spotify.com/v1", "") : null;
+  }
+  return uris;
 }
 
 // Loads the public client id, completes any pending OAuth redirect, and exposes
@@ -1070,10 +1134,20 @@ function App() {
 
   // two modes: trace a route between two songs, or explore one song's
   // neighborhood in the shared embedding space.
-  const [mode, setMode] = useState<"route" | "explore" | "playlist">("route");
+  const [mode, setMode] = useState<"route" | "explore" | "playlist" | "byop">(
+    "route",
+  );
   const [solo, setSolo] = useState<Candidate | null>(null);
   const [embed, setEmbed] = useState<EmbedResponse | null>(null);
   const [embedding, setEmbedding] = useState(false);
+  // BYOP: re-ordering a user's own playlist. `arranging` gates the request; the
+  // arranged result reuses `route` (same shape), so the whole composer/save
+  // pipeline consumes it unchanged. `originMode` remembers where the composer
+  // was entered from so "Back to map" returns there (route vs. byop).
+  const [arranging, setArranging] = useState(false);
+  const originMode = useRef<"route" | "byop">("route");
+  // dismiss flag for the "not everything fit" notice on a BYOP arrangement
+  const [byopNoticeSeen, setByopNoticeSeen] = useState(false);
 
   const [route, setRoute] = useState<RouteResponse | null>(() => {
     try {
@@ -1118,6 +1192,7 @@ function App() {
   useEffect(() => {
     setReach(0);
     setCuration(emptyCuration());
+    setByopNoticeSeen(false);
   }, [route]);
 
   // Rank the neighborhood once per route; everything in the composer derives
@@ -1140,10 +1215,14 @@ function App() {
   }, [curationRows]);
 
   const enterPlaylist = () => {
-    if (route) setMode("playlist");
+    if (route) {
+      // remember whether this playlist came from a traced route or a BYOP import
+      if (mode === "route" || mode === "byop") originMode.current = mode;
+      setMode("playlist");
+    }
   };
-  // Leaving the composer returns to the route map it was built from.
-  const backToMap = () => setMode("route");
+  // Leaving the composer returns to the map it was built from (route or byop).
+  const backToMap = () => setMode(originMode.current);
 
   // The single curation gesture, shared by the galaxy (click a star) and the
   // composer list (remove/restore). Stops toggle their excluded flag and stay as
@@ -1274,6 +1353,39 @@ function App() {
     setStart(candidateFromNode(n));
   };
 
+  // BYOP: re-order an imported playlist into a journey. The response is
+  // route-shaped, so it flows into the same RouteField + composer + save.
+  const runArrange = async (uris: string[], name: string | null) => {
+    if (arranging) return;
+    setMode("byop");
+    originMode.current = "byop";
+    setArranging(true);
+    setError(null);
+    setFocus(null);
+    setInspect(null);
+    setEmbed(null);
+    try {
+      const data = await request<RouteResponse>(
+        "/api/arrange",
+        post({ uris, name, context, shuffle }),
+      );
+      setRoute(data);
+      setComposerOpen(false); // collapse the mobile sheet so the map reveals
+    } catch (e) {
+      const cpuLimited =
+        e instanceof ApiError && (e.status === 503 || e.status === 524);
+      setError(
+        cpuLimited
+          ? "This playlist was too large to arrange within the free compute budget — try a shorter one."
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
+    } finally {
+      setArranging(false);
+    }
+  };
+
   // on first load, trace a shared ?from=&to= permalink
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
@@ -1319,15 +1431,19 @@ function App() {
       ? route
         ? `Composing · ${route.requested_start.name} → ${route.requested_end.name}`
         : "Composing a playlist"
-      : mode === "route"
-        ? start && end
-          ? `${start.name} → ${end.name}`
-          : start
-            ? `${start.name} → choose a destination`
-            : "Trace a journey between two songs"
-        : solo
-          ? solo.name
-          : "Explore one song’s neighbourhood";
+      : mode === "byop"
+        ? route?.source?.name
+          ? `Your playlist · ${route.source.name}`
+          : "Bring your own playlist"
+        : mode === "route"
+          ? start && end
+            ? `${start.name} → ${end.name}`
+            : start
+              ? `${start.name} → choose a destination`
+              : "Trace a journey between two songs"
+          : solo
+            ? solo.name
+            : "Explore one song’s neighbourhood";
 
   return (
     <main className="app">
@@ -1369,7 +1485,13 @@ function App() {
           onClick={() => setComposerOpen(true)}
         >
           <span className="ctIcon" aria-hidden>
-            {mode === "route" ? <RouteIcon size={15} /> : <Orbit size={15} />}
+            {mode === "route" ? (
+              <RouteIcon size={15} />
+            ) : mode === "byop" ? (
+              <ListMusic size={15} />
+            ) : (
+              <Orbit size={15} />
+            )}
           </span>
           <span className="ctText">{composerSummary}</span>
           <span className="ctCue" aria-hidden>
@@ -1382,7 +1504,11 @@ function App() {
           <div className="sheetHandle" aria-hidden />
           <div className="sheetBar">
             <span className="sheetTitle">
-              {mode === "route" ? "Trace a journey" : "Explore a song"}
+              {mode === "route"
+                ? "Trace a journey"
+                : mode === "byop"
+                  ? "Bring your own playlist"
+                  : "Explore a song"}
             </span>
             <button
               className="sheetClose"
@@ -1412,6 +1538,14 @@ function App() {
                 onClick={() => setMode("explore")}
               >
                 <Orbit size={14} aria-hidden /> <span>Explore</span>
+              </button>
+              <button
+                role="tab"
+                className={mode === "byop" ? "on" : ""}
+                aria-selected={mode === "byop"}
+                onClick={() => setMode("byop")}
+              >
+                <ListMusic size={14} aria-hidden /> <span>Your playlist</span>
               </button>
             </div>
           )}
@@ -1470,6 +1604,13 @@ function App() {
                 <span>{embedding ? "Scanning" : "Explore"}</span>
               </button>
             </>
+          ) : mode === "byop" ? (
+            <ByopPanel
+              auth={auth}
+              onArrange={runArrange}
+              arranging={arranging}
+              onError={setError}
+            />
           ) : (
             <div className="composeHint">
               <span className="composeHintRoute">
@@ -1499,7 +1640,7 @@ function App() {
         aria-hidden
       />
 
-      {!route && !embed && status === "idle" && (
+      {!route && !embed && status === "idle" && !arranging && (
         <Intro
           mode={mode}
           ready={mode === "route" ? !!start && !!end : !!solo}
@@ -1511,7 +1652,11 @@ function App() {
         <div className="toast" role="alert">
           <strong>
             Couldn’t{" "}
-            {mode === "explore" ? "explore that track" : "trace that route"}
+            {mode === "explore"
+              ? "explore that track"
+              : mode === "byop"
+                ? "arrange that playlist"
+                : "trace that route"}
           </strong>
           <span>{error}</span>
           <button aria-label="Dismiss" onClick={() => setError(null)}>
@@ -1519,6 +1664,25 @@ function App() {
           </button>
         </div>
       )}
+      {route?.source &&
+        mode !== "playlist" &&
+        !byopNoticeSeen &&
+        (route.source.truncated > 0 || route.source.unresolved.length > 0) && (
+          <div className="toast info" role="status">
+            <strong>
+              Arranged {route.source.placed} of {route.source.requested} tracks
+            </strong>
+            <span>
+              {route.source.truncated > 0 &&
+                `${route.source.truncated} past the playlist limit were skipped. `}
+              {route.source.unresolved.length > 0 &&
+                `${route.source.unresolved.length} couldn’t be placed on the map.`}
+            </span>
+            <button aria-label="Dismiss" onClick={() => setByopNoticeSeen(true)}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
       {route && mode !== "playlist" && (
         <JourneyStrip
@@ -1853,15 +2017,207 @@ function Options(props: OptionsProps) {
 // ===========================================================================
 // `compact` (mobile) trims the copy and the layout drops it below the rotating
 // splash cloud, so the dot map stays legible on a small screen.
+// ---------------------------------------------------------------------------
+// Bring Your Own Playlist — the import controls. Two ways in: paste a public
+// playlist link (read server-side with client credentials), or connect the
+// listener's account and pick one of their own playlists (read in-browser with
+// the user token). Either way it hands a list of track uris up to `onArrange`,
+// which re-orders them into a journey (the same composer/save follow).
+// ---------------------------------------------------------------------------
+function ByopPanel({
+  auth,
+  onArrange,
+  arranging,
+  onError,
+}: {
+  auth: { clientId: string | null; token: string | null; login: () => void };
+  onArrange: (uris: string[], name: string | null) => void;
+  arranging: boolean;
+  onError: (msg: string | null) => void;
+}) {
+  const [tab, setTab] = useState<"url" | "account">("url");
+  const [urlInput, setUrlInput] = useState("");
+  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [playlists, setPlaylists] = useState<MyPlaylist[] | null>(null);
+  const [loadingLists, setLoadingLists] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const fail = (e: unknown) =>
+    onError(e instanceof Error ? e.message : String(e));
+
+  const importUrl = async () => {
+    const link = urlInput.trim();
+    if (!link || loadingUrl || arranging) return;
+    setLoadingUrl(true);
+    onError(null);
+    try {
+      const data = await request<{ name: string; uris: string[] }>(
+        `/api/playlist?url=${encodeURIComponent(link)}`,
+      );
+      if (!data.uris?.length)
+        throw new ApiError(404, "That playlist has no playable tracks to arrange.");
+      onArrange(data.uris, data.name ?? null);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setLoadingUrl(false);
+    }
+  };
+
+  const loadMine = async () => {
+    if (!auth.token) {
+      auth.login();
+      return;
+    }
+    setLoadingLists(true);
+    onError(null);
+    try {
+      setPlaylists(await fetchMyPlaylists(auth.token));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setLoadingLists(false);
+    }
+  };
+
+  const pick = async (pl: MyPlaylist) => {
+    if (!auth.token || arranging) {
+      if (!auth.token) auth.login();
+      return;
+    }
+    setBusyId(pl.id);
+    onError(null);
+    try {
+      const uris = await fetchPlaylistTrackUris(auth.token, pl.id);
+      if (!uris.length)
+        throw new ApiError(404, "That playlist has no playable tracks to arrange.");
+      onArrange(uris, pl.name);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="byop">
+      <div className="byopTabs" role="tablist" aria-label="Playlist source">
+        <button
+          role="tab"
+          aria-selected={tab === "url"}
+          className={tab === "url" ? "on" : ""}
+          onClick={() => setTab("url")}
+        >
+          <Link2 size={13} aria-hidden /> <span>Public link</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "account"}
+          className={tab === "account" ? "on" : ""}
+          onClick={() => setTab("account")}
+        >
+          <ListMusic size={13} aria-hidden /> <span>Your account</span>
+        </button>
+      </div>
+
+      {tab === "url" ? (
+        <div className="byopUrl">
+          <input
+            className="byopInput"
+            type="text"
+            inputMode="url"
+            value={urlInput}
+            placeholder="Paste a public Spotify playlist link"
+            aria-label="Public Spotify playlist link"
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void importUrl();
+            }}
+          />
+          <button
+            className="trace"
+            disabled={!urlInput.trim() || arranging || loadingUrl}
+            onClick={() => void importUrl()}
+          >
+            {arranging || loadingUrl ? (
+              <Loader2 size={16} className="spin" aria-hidden />
+            ) : (
+              <Sparkles size={16} aria-hidden />
+            )}
+            <span>{arranging ? "Arranging" : loadingUrl ? "Reading" : "Arrange"}</span>
+          </button>
+        </div>
+      ) : (
+        <div className="byopAccount">
+          {!auth.clientId ? (
+            <p className="byopHint">Spotify isn’t configured for this deployment.</p>
+          ) : !auth.token ? (
+            <button className="trace" onClick={auth.login}>
+              <LogIn size={16} aria-hidden />
+              <span>Connect Spotify</span>
+            </button>
+          ) : playlists === null ? (
+            <button className="trace" disabled={loadingLists} onClick={() => void loadMine()}>
+              {loadingLists ? (
+                <Loader2 size={16} className="spin" aria-hidden />
+              ) : (
+                <ListMusic size={16} aria-hidden />
+              )}
+              <span>{loadingLists ? "Loading" : "Load my playlists"}</span>
+            </button>
+          ) : playlists.length === 0 ? (
+            <p className="byopHint">No playlists found on your account.</p>
+          ) : (
+            <ul className="byopList">
+              {playlists.map((pl) => (
+                <li key={pl.id}>
+                  <button
+                    className="byopRow"
+                    disabled={arranging || busyId !== null}
+                    onClick={() => void pick(pl)}
+                    title={`Arrange “${pl.name}”`}
+                  >
+                    <span className="byopPlName">{pl.name}</span>
+                    <span className="byopPlMeta">
+                      {busyId === pl.id ? (
+                        <Loader2 size={13} className="spin" aria-hidden />
+                      ) : (
+                        `${pl.tracks} tracks`
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Intro({
   mode,
   ready,
   compact,
 }: {
-  mode: "route" | "explore" | "playlist";
+  mode: "route" | "explore" | "playlist" | "byop";
   ready: boolean;
   compact: boolean;
 }) {
+  if (mode === "byop") {
+    return (
+      <div className="intro">
+        <h1>Bring your own playlist</h1>
+        <p>Add a playlist and watch its songs re-ordered into a journey across the map of taste.</p>
+        <p className="cue">
+          {compact
+            ? "Tap the bar above to add a playlist."
+            : "Paste a public link, or connect your account to pick one."}
+        </p>
+      </div>
+    );
+  }
   if (mode === "explore") {
     return (
       <div className="intro">
@@ -2376,9 +2732,15 @@ function ComposePanel({
     setSaving(true);
     onError(null);
     try {
-      const name = `${route.requested_start.name} → ${route.requested_end.name}`;
+      // A BYOP arrangement is named after the source playlist; a traced route is
+      // named by its endpoints.
+      const name = route.source?.name
+        ? `${route.source.name} · re-ordered`
+        : `${route.requested_start.name} → ${route.requested_end.name}`;
       const description = [
-        `A Pathfinder playlist of ${uris.length} tracks`,
+        route.source
+          ? `Your playlist re-ordered by Pathfinder into a journey of ${uris.length} tracks`
+          : `A Pathfinder playlist of ${uris.length} tracks`,
         nearbyIncluded > 0 ? ` — ${nearbyIncluded} gathered nearby` : "",
         ".",
         route.context ? ` Context: ${route.context}.` : "",
@@ -2608,7 +2970,7 @@ function Scene({
   onInspect: (n: TrackNode | null) => void;
   warp: boolean;
   includedIds: Set<string>;
-  mode: "route" | "explore" | "playlist";
+  mode: "route" | "explore" | "playlist" | "byop";
   reachCloud: ReachStop[];
   reach: number;
   curation: Curation;
@@ -2728,6 +3090,7 @@ function Scene({
             includedIds={includedIds}
             selKey={selKey}
             playKey={playKey}
+            sectorShift={mode === "byop" ? BYOP_SHIFT : undefined}
           />
         )}
         {composing && route && (
@@ -3017,6 +3380,11 @@ function ComposeRig({
 // a ?from=&to= permalink that traces before the sample loads). Normally the route
 // is placed at its true displacement from the splash centroid in the shared layout.
 const ROUTE_SECTOR = new THREE.Vector3(12, 7, -46);
+
+// BYOP arrangements share the RouteField renderer but live in their OWN region
+// of the galaxy — a fixed translation added to the placement so a re-ordered
+// playlist occupies a distinct sector from a traced route (its own space).
+const BYOP_SHIFT = new THREE.Vector3(-26, -6, 30);
 
 // centroid of a set of nodes in raw (shared-layout) coordinates
 function nodesCentroid(nodes: TrackNode[]): THREE.Vector3 {
@@ -3361,6 +3729,7 @@ function RouteField({
   includedIds,
   selKey,
   playKey,
+  sectorShift,
 }: {
   route: RouteResponse;
   focus: number | null;
@@ -3375,6 +3744,9 @@ function RouteField({
   includedIds: Set<string>;
   selKey: string | null;
   playKey: string | null;
+  // Optional fixed translation added to the cluster placement — used to give a
+  // BYOP arrangement its own galaxy sector, distinct from a traced route.
+  sectorShift?: THREE.Vector3;
 }) {
   // Freeze the splash centroid at mount. It lives in a ref on the parent that
   // the idle field updates asynchronously — and on a *second* trace (or after an
@@ -3405,6 +3777,8 @@ function RouteField({
     const len = offset.length();
     if (len < 14)
       offset.copy(len > 1e-3 ? offset.multiplyScalar(14 / len) : ROUTE_SECTOR);
+    // BYOP arrangements ride into their own sector via a fixed translation.
+    if (sectorShift) offset.add(sectorShift);
     const tf = (p: [number, number, number]): [number, number, number] => [
       offset.x + (p[0] - Cr.x) * s,
       offset.y + (p[1] - Cr.y) * s,

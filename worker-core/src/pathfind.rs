@@ -465,3 +465,146 @@ pub fn densify(
     }
     path
 }
+
+/// A node in a fixed set to be re-ordered (Bring-Your-Own-Playlist). Carries
+/// everything the step-cost needs. Unlike A*, no node may be dropped — the whole
+/// user set must survive — so there are no hard `violates()` constraints here;
+/// ordering only *minimizes* the same cost A* weighs.
+pub struct OrderNode<'a> {
+    pub vec: &'a [f32],
+    pub fit: f64,
+    pub meta: &'a Meta,
+}
+
+/// Re-order a fixed set of tracks into the lowest-cost open path — an asymmetric
+/// open-TSP over the *same* step-cost as `find_path_open` (cosine distance, fit,
+/// genre-jump, transition affinity, time-of-day context). Returns a permutation
+/// of `0..nodes.len()`. Transition affinity and context fit are min-max
+/// normalized globally (across all ordered pairs / all nodes) — the fixed-set
+/// analog of A*'s per-expansion normalization. Construction is greedy
+/// nearest-neighbor from the best of all seeds, then 2-opt to convergence; the
+/// caller caps N (playlist length), so the O(N^2) cost matrix and
+/// O(N^2)-per-pass 2-opt stay cheap.
+pub fn order_fixed(
+    nodes: &[OrderNode],
+    model: Option<&TransitionModel>,
+    ctx: Option<&Context>,
+) -> Vec<usize> {
+    let n = nodes.len();
+    if n <= 2 {
+        return (0..n).collect();
+    }
+
+    // Global min-max normalization of the transition term over all ordered pairs
+    // (flat n*n; entry i*n+j is the normalized affinity of the hop i→j), and of
+    // the context term over all nodes. Empty when there's no transition model.
+    let mut trans: Vec<f64> = Vec::new();
+    let mut ctxn: Vec<f64> = Vec::new();
+    if let Some(m) = model {
+        let mut raw = vec![0.0f64; n * n];
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for i in 0..n {
+            for j in 0..n {
+                if i != j {
+                    let a = m.affinity(nodes[i].meta, nodes[j].meta);
+                    raw[i * n + j] = a;
+                    lo = lo.min(a);
+                    hi = hi.max(a);
+                }
+            }
+        }
+        let span = hi - lo;
+        trans = raw
+            .iter()
+            .map(|&v| if span > 0.0 { (v - lo) / span } else { 0.5 })
+            .collect();
+        if let Some(cx) = ctx {
+            let raw_c: Vec<(usize, f64)> =
+                (0..n).map(|j| (j, m.context_fit(nodes[j].meta, cx))).collect();
+            let norm = minmax(&raw_c);
+            ctxn = (0..n).map(|j| norm.get(&j).copied().unwrap_or(0.5)).collect();
+        }
+    }
+
+    // Precompute the asymmetric cost matrix once. cm[i*n+j] = cost of placing j
+    // immediately after i — the same weighted terms as the A* step cost.
+    let mut cm = vec![0.0f64; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut step = W_DIST * cos_dist_vv(nodes[i].vec, nodes[j].vec);
+            step += W_FIT * (1.0 - nodes[j].fit);
+            if nodes[i].meta.genre != nodes[j].meta.genre {
+                step += W_DIV * GENRE_JUMP_PENALTY;
+            }
+            if !trans.is_empty() {
+                step += W_TRANS * (1.0 - trans[i * n + j]);
+            }
+            if !ctxn.is_empty() {
+                step += W_CTX * (1.0 - ctxn[j]);
+            }
+            cm[i * n + j] = step;
+        }
+    }
+    let tour_cost = |order: &[usize]| -> f64 {
+        order.windows(2).map(|w| cm[w[0] * n + w[1]]).sum()
+    };
+
+    // Greedy nearest-neighbor from every seed; keep the cheapest construction.
+    let mut best_order: Vec<usize> = (0..n).collect();
+    let mut best_cost = f64::INFINITY;
+    for seed in 0..n {
+        let mut used = vec![false; n];
+        let mut order = Vec::with_capacity(n);
+        order.push(seed);
+        used[seed] = true;
+        for _ in 1..n {
+            let last = *order.last().unwrap();
+            let mut nx = 0usize;
+            let mut nx_cost = f64::INFINITY;
+            for j in 0..n {
+                if used[j] {
+                    continue;
+                }
+                let c = cm[last * n + j];
+                if c < nx_cost {
+                    nx_cost = c;
+                    nx = j;
+                }
+            }
+            order.push(nx);
+            used[nx] = true;
+        }
+        let tc = tour_cost(&order);
+        if tc < best_cost {
+            best_cost = tc;
+            best_order = order;
+        }
+    }
+
+    // 2-opt for an open path: reverse best_order[i..=j] whenever it lowers the
+    // total cost. The cost is asymmetric, so re-score the whole tour per move
+    // (cheap at these N). Iterate to convergence with a hard pass cap.
+    let mut improved = true;
+    let mut passes = 0;
+    while improved && passes < 60 {
+        improved = false;
+        passes += 1;
+        for i in 1..n - 1 {
+            for j in i + 1..n {
+                let mut cand = best_order.clone();
+                cand[i..=j].reverse();
+                let tc = tour_cost(&cand);
+                if tc + 1e-12 < best_cost {
+                    best_cost = tc;
+                    best_order = cand;
+                    improved = true;
+                }
+            }
+        }
+    }
+    best_order
+}

@@ -10,7 +10,7 @@ pub mod scorer;
 pub mod snapshot;
 pub mod transit;
 
-use pathfind::EndSpec;
+use pathfind::{EndSpec, OrderNode};
 use project::Projector;
 use scorer::Scorer;
 use serde_json::{json, Value};
@@ -707,6 +707,197 @@ pub fn route_open(
             };
             json!({
                 "dist": cos_dist_slices(vecs[a], vecs[b]),
+                "fit": fits[b],
+                "genre_jump": metas[a].genre != metas[b].genre,
+                "prev_genre": metas[a].genre,
+                "transition": transition,
+                "context": context,
+            })
+        };
+
+        let path_json: Vec<Value> = (0..n_path)
+            .map(|i| {
+                let mut v = node_json(&ids[i], &metas[i], fits[i], pos[i], w4[i], "path");
+                if let Value::Object(ref mut map) = v {
+                    map.insert("why".into(), why_for(i));
+                }
+                v
+            })
+            .collect();
+        let cloud_json: Vec<Value> = cloud
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| {
+                node_json(
+                    &c.ids[r].to_string(),
+                    &c.meta[r],
+                    c.fit[r] as f64,
+                    pos[n_path + i],
+                    w4[n_path + i],
+                    "cloud",
+                )
+            })
+            .collect();
+        let edges: Vec<Value> = ids
+            .windows(2)
+            .map(|w| json!({"from": w[0], "to": w[1], "kind": "path"}))
+            .collect();
+        let start_pos = pos[0];
+        let end_pos = pos[n_path - 1];
+
+        Ok(json!({
+            "context": ctx.as_ref().map(|c| c.label.clone()),
+            "path": path_json,
+            "cloud": cloud_json,
+            "edges": edges,
+            "req_start_pos": [start_pos[0], start_pos[1], start_pos[2]],
+            "req_end_pos": [end_pos[0], end_pos[1], end_pos[2]],
+        })
+        .to_string())
+    })
+}
+
+/// One track in a Bring-Your-Own-Playlist arrange request. `row >= 0` is an
+/// in-corpus track (its `vec`/`fit`/`meta` are pulled from the corpus and any
+/// supplied values ignored); `row < 0` is an off-map track carrying its own
+/// projected `vec`, live `fit`, and `meta` (`{uri,name,artist,album,genre}`) —
+/// exactly the two cases `resolveEndpoint` produces in the Worker.
+#[derive(serde::Deserialize)]
+struct ArrangeTrack {
+    row: i32,
+    #[serde(default)]
+    vec: Vec<f32>,
+    #[serde(default)]
+    fit: f32,
+    #[serde(default)]
+    meta: Option<Meta>,
+}
+
+/// Re-order a **fixed** set of tracks (a user's own playlist) into the
+/// lowest-cost journey through the taste map, keeping every track. `tracks_json`
+/// is a JSON array of `ArrangeTrack`. Unlike `route`/`route_open` — which take
+/// two endpoints and *discover* the tracks between — this permutes the given set
+/// and never adds or drops one. The response shape is identical to `route_open`
+/// (`path` = the user's tracks in the chosen order; `cloud` = their corpus
+/// neighbors, so the composer's "gather nearby" still works), so the frontend
+/// composer + save pipeline consume it unchanged.
+#[wasm_bindgen]
+pub fn arrange(tracks_json: &str, tod: &str, shuffle: &str) -> Result<String, JsValue> {
+    with_state(|st| {
+        let c = &st.corpus;
+        let tracks: Vec<ArrangeTrack> =
+            serde_json::from_str(tracks_json).map_err(|e| err(format!("arrange tracks: {e}")))?;
+        if tracks.len() < 2 {
+            return Err(err("arrange needs at least 2 tracks"));
+        }
+
+        // Materialize every track's descriptor (owned, so the OrderNode borrows
+        // and the later PCA both stay valid). Corpus tracks pull from the corpus;
+        // off-map tracks carry their own projected latent + meta.
+        let mut ids: Vec<String> = Vec::with_capacity(tracks.len());
+        let mut metas: Vec<Meta> = Vec::with_capacity(tracks.len());
+        let mut fits: Vec<f64> = Vec::with_capacity(tracks.len());
+        let mut vecs: Vec<Vec<f32>> = Vec::with_capacity(tracks.len());
+        let mut rows: Vec<Option<usize>> = Vec::with_capacity(tracks.len());
+        for (i, t) in tracks.iter().enumerate() {
+            if t.row >= 0 {
+                let r = t.row as usize;
+                if r >= c.n {
+                    return Err(err(format!("arrange track {i}: row out of range")));
+                }
+                ids.push(c.ids[r].to_string());
+                metas.push(c.meta[r].clone());
+                fits.push(c.fit[r] as f64);
+                vecs.push(c.vec_at(r).to_vec());
+                rows.push(Some(r));
+            } else {
+                if t.vec.len() != c.dim {
+                    return Err(err(format!("arrange track {i}: off-map vec dim mismatch")));
+                }
+                let m = t
+                    .meta
+                    .clone()
+                    .ok_or_else(|| err(format!("arrange track {i}: off-map meta missing")))?;
+                ids.push(m.uri.clone());
+                metas.push(m);
+                fits.push(t.fit as f64);
+                vecs.push(t.vec.clone());
+                rows.push(None);
+            }
+        }
+
+        let model = st.transitions.as_ref();
+        let ctx = model.map(|m| {
+            let tod = if tod == "any" { "" } else { tod };
+            let shuffle = if shuffle == "any" { "" } else { shuffle };
+            m.resolve_context(tod, shuffle)
+        });
+
+        // Choose the ordering over the same step-cost A* weighs.
+        let perm = {
+            let nodes: Vec<OrderNode> = (0..metas.len())
+                .map(|i| OrderNode {
+                    vec: &vecs[i],
+                    fit: fits[i],
+                    meta: &metas[i],
+                })
+                .collect();
+            pathfind::order_fixed(&nodes, model, ctx.as_ref())
+        };
+
+        // Reorder descriptors into the chosen sequence.
+        let ids: Vec<String> = perm.iter().map(|&i| ids[i].clone()).collect();
+        let metas: Vec<Meta> = perm.iter().map(|&i| metas[i].clone()).collect();
+        let fits: Vec<f64> = perm.iter().map(|&i| fits[i]).collect();
+        let vecs: Vec<Vec<f32>> = perm.iter().map(|&i| vecs[i].clone()).collect();
+        let rows: Vec<Option<usize>> = perm.iter().map(|&i| rows[i]).collect();
+        let n_path = ids.len();
+
+        // cloud: up to 12 neighbors per stop (corpus neighbors for in-corpus
+        // tracks; the off-map track's own nearest rows via knn_vec), capped at
+        // 150 — matching `route`/`route_open` so the composer reveals the same
+        // kind of neighborhood.
+        let mut cloud: Vec<usize> = Vec::new();
+        let mut seen: std::collections::HashSet<usize> = rows.iter().filter_map(|&r| r).collect();
+        'outer: for i in 0..n_path {
+            let nbrs: Vec<(usize, f64)> = match rows[i] {
+                Some(r) => c.neighbors(r),
+                None => c.knn_vec(&vecs[i], c.k),
+            };
+            for (nbr, _) in nbrs.into_iter().take(12) {
+                if seen.insert(nbr) {
+                    cloud.push(nbr);
+                }
+                if cloud.len() >= 150 {
+                    break 'outer;
+                }
+            }
+        }
+
+        // Path-anchored PCA over [path..., cloud...] (axes from the path vecs).
+        let mut all_vecs: Vec<&[f32]> = Vec::with_capacity(n_path + cloud.len());
+        for v in &vecs {
+            all_vecs.push(v.as_slice());
+        }
+        for &r in &cloud {
+            all_vecs.push(c.vec_at(r));
+        }
+        let (pos, w4) = pca::project4d_anchored(&all_vecs, c.dim, n_path);
+
+        let why_for = |i: usize| -> Value {
+            if i == 0 {
+                return Value::Null;
+            }
+            let (a, b) = (i - 1, i);
+            let transition = model
+                .map(|m| Value::from(m.affinity(&metas[a], &metas[b])))
+                .unwrap_or(Value::Null);
+            let context = match (model, ctx.as_ref()) {
+                (Some(m), Some(cx)) => Value::from(m.context_fit(&metas[b], cx)),
+                _ => Value::Null,
+            };
+            json!({
+                "dist": cos_dist_slices(&vecs[a], &vecs[b]),
                 "fit": fits[b],
                 "genre_jump": metas[a].genre != metas[b].genre,
                 "prev_genre": metas[a].genre,

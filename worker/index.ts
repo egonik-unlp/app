@@ -19,6 +19,7 @@ import {
   fit_at,
   route as wasmRoute,
   route_open as wasmRouteOpen,
+  arrange as wasmArrange,
   project_and_snap,
   score_cold,
   search as corpusSearch,
@@ -161,6 +162,18 @@ function spotifyIdOf(value: string): string {
   const v = value.trim();
   if (v.startsWith("spotify:track:")) return v.split(":").pop()!;
   return v.split("?")[0].replace(/.*[/:]/, "");
+}
+
+// Parse a Spotify PLAYLIST id from a uri (spotify:playlist:ID), an
+// open.spotify.com/playlist/ID URL, or a bare id. Distinct from spotifyIdOf
+// (which is track-only and always rewraps as spotify:track:). Returns null when
+// the input isn't recognizably a playlist reference.
+function spotifyPlaylistIdOf(value: string): string | null {
+  const v = value.trim();
+  const m = /playlist[:/]([A-Za-z0-9]+)/.exec(v);
+  if (m) return m[1];
+  if (/^[A-Za-z0-9]{16,}$/.test(v)) return v; // bare id
+  return null;
 }
 
 async function spotifyTokenGet(env: Env): Promise<string> {
@@ -543,6 +556,195 @@ async function buildEmbed(env: Env, payload: any, state: CoreState) {
   return { track: requestedNode(resolved, emb.pos, !resolved.exact), cloud: emb.cloud };
 }
 
+// ---- /api/arrange + /api/playlist (Bring Your Own Playlist) ----------------
+// Upper bounds that keep an arrange request inside the Worker CPU + subrequest
+// budget. Every not-in-corpus track costs a cold-start (Spotify track+artists +
+// ReccoBeats + one AI embed ≈ 4 subrequests); in-corpus tracks are free. We keep
+// at most BYOP_MAX_TRACKS of the playlist and cold-start at most
+// BYOP_MAX_COLDSTART of those — anything beyond is reported, never silently
+// dropped (PRODUCT: "no silent caps", "honest about uncertainty").
+const BYOP_MAX_TRACKS = 50;
+const BYOP_MAX_COLDSTART = 20;
+const BYOP_COLDSTART_CONCURRENCY = 4;
+
+// Read a PUBLIC playlist's tracks via the app's client-credentials token (no
+// user auth). Private/collaborative playlists — and, since Nov 2024, Spotify's
+// own editorial playlists — aren't readable this way; those come in through the
+// browser user token instead. Returns display rows + the spotify:track: uris.
+async function fetchPublicPlaylist(
+  env: Env,
+  idOrUrl: string,
+): Promise<{ id: string; name: string; uris: string[]; tracks: any[]; total: number }> {
+  const id = spotifyPlaylistIdOf(idOrUrl);
+  if (!id) throw new ApiError(400, "Couldn't read a Spotify playlist link or id from that input.");
+  let meta: any;
+  try {
+    meta = await spotifyGet(env, `playlists/${id}`, { fields: "name" });
+  } catch (e: any) {
+    if (e instanceof ApiError && (e.status === 404 || e.status === 403)) {
+      throw new ApiError(
+        404,
+        "Couldn't open that playlist — it must be a public, user-made playlist (private, collaborative, and Spotify's own editorial playlists can't be read).",
+      );
+    }
+    throw e;
+  }
+  const uris: string[] = [];
+  const tracks: any[] = [];
+  let offset = 0;
+  const LIMIT = 100;
+  // fetch a little past the cap so the truncation notice is honest.
+  const HARD = BYOP_MAX_TRACKS + 50;
+  for (;;) {
+    const page = await spotifyGet(env, `playlists/${id}/tracks`, {
+      fields: "items(track(uri,name,artists(name),is_local,type)),next",
+      limit: String(LIMIT),
+      offset: String(offset),
+    });
+    const items = page.items ?? [];
+    for (const it of items) {
+      const t = it?.track;
+      if (!t || t.is_local || t.type !== "track") continue;
+      const uri: string = t.uri ?? "";
+      if (!uri.startsWith("spotify:track:")) continue;
+      uris.push(uri);
+      tracks.push({ uri, name: t.name ?? "Unknown track", artist: (t.artists ?? []).map((a: any) => a.name).filter(Boolean).join(", ") });
+    }
+    if (!page.next || items.length === 0 || uris.length >= HARD) break;
+    offset += LIMIT;
+  }
+  return { id, name: meta?.name ?? "Playlist", uris, tracks, total: uris.length };
+}
+
+// Resolve a batch of track uris to corpus/cold-start endpoints under the
+// cold-start budget. In-corpus tracks resolve for free; off-corpus tracks are
+// cold-started up to the cap with bounded concurrency. Never throws for one bad
+// track — failures and budget overflow are collected in `unresolved`.
+async function resolveArrangeBatch(
+  env: Env,
+  uris: string[],
+  state: CoreState,
+): Promise<{ resolved: Resolved[]; unresolved: { uri: string; reason: string }[] }> {
+  const resolved: Resolved[] = [];
+  const unresolved: { uri: string; reason: string }[] = [];
+  const cold: string[] = [];
+  for (const uri of uris) {
+    if (find_row(uri) >= 0) {
+      // in-corpus: no network / AI — resolve immediately.
+      resolved.push(await resolveEndpoint(env, uri, state));
+    } else {
+      cold.push(uri);
+    }
+  }
+  const toCold = cold.slice(0, BYOP_MAX_COLDSTART);
+  for (const uri of cold.slice(BYOP_MAX_COLDSTART))
+    unresolved.push({ uri, reason: "cold-start budget reached" });
+  for (let i = 0; i < toCold.length; i += BYOP_COLDSTART_CONCURRENCY) {
+    const chunk = toCold.slice(i, i + BYOP_COLDSTART_CONCURRENCY);
+    const settled = await Promise.allSettled(chunk.map((u) => resolveEndpoint(env, u, state)));
+    settled.forEach((s, j) => {
+      if (s.status === "fulfilled") resolved.push(s.value);
+      else unresolved.push({ uri: chunk[j], reason: String(s.reason?.message ?? s.reason).slice(0, 140) });
+    });
+  }
+  return { resolved, unresolved };
+}
+
+// A `requested`-kind endpoint node built from an arrange path endpoint (which is
+// already one of the user's own tracks). No snap link — the track IS the stop.
+function requestedFromNode(n: any, pos: number[]): any {
+  return {
+    id: n.id,
+    uri: n.uri,
+    name: n.name,
+    artist: n.artist,
+    album: n.album ?? null,
+    genre: n.genre ?? "unknown",
+    spotify_url: n.spotify_url ?? null,
+    fit: n.fit ?? null,
+    position: pos,
+    kind: "requested",
+    snapped_to: null,
+    snapped_label: null,
+  };
+}
+
+// Re-order a user-supplied playlist into a journey. Body: { uris[], name?,
+// context?, shuffle? }. Resolves each uri (corpus or cold-start, budgeted),
+// permutes the fixed set via the WASM `arrange`, and returns the same shape as
+// /api/route — so the frontend composer + save consume it unchanged — plus a
+// `source` block describing the playlist and anything that couldn't be placed.
+async function buildArrange(env: Env, payload: any, state: CoreState) {
+  const rawUris: unknown = payload.uris;
+  if (!Array.isArray(rawUris) || rawUris.length === 0) {
+    throw new ApiError(400, "uris (a non-empty array of Spotify track uris/ids) is required");
+  }
+  // Normalize to spotify:track: uris and de-dupe, preserving first-seen order.
+  const seen = new Set<string>();
+  const norm: string[] = [];
+  for (const u of rawUris) {
+    if (typeof u !== "string" || !u.trim()) continue;
+    const uri = `spotify:track:${spotifyIdOf(u)}`;
+    if (!seen.has(uri)) {
+      seen.add(uri);
+      norm.push(uri);
+    }
+  }
+  const kept = norm.slice(0, BYOP_MAX_TRACKS);
+  const truncated = norm.length - kept.length;
+
+  const { resolved, unresolved } = await resolveArrangeBatch(env, kept, state);
+  if (resolved.length < 2) {
+    throw new ApiError(
+      422,
+      "Couldn't place enough of this playlist on the map — need at least 2 tracks that are in the corpus or can be cold-started.",
+    );
+  }
+
+  const tracks = resolved.map((r) =>
+    r.exact
+      ? { row: r.anchorRow }
+      : {
+          row: -1,
+          vec: Array.from(r.vec),
+          fit: r.fit ?? 0.5,
+          meta: {
+            uri: r.display.uri,
+            name: r.display.name,
+            artist: r.display.artist,
+            album: r.display.album ?? null,
+            genre: r.display.genre ?? "unknown",
+          },
+        },
+  );
+
+  const ctx = payload.context ?? "now";
+  const tod = ctx === "any" ? "any" : ctx === "now" ? todBucket(new Date().getUTCHours()) : ctx;
+  const shuffle = payload.shuffle ?? "any";
+
+  const out = JSON.parse(wasmArrange(JSON.stringify(tracks), tod, shuffle));
+  const path = out.path as any[];
+
+  return {
+    context: out.context,
+    requested_start: requestedFromNode(path[0], out.req_start_pos),
+    requested_end: requestedFromNode(path[path.length - 1], out.req_end_pos),
+    path,
+    cloud: out.cloud,
+    edges: out.edges,
+    // BYOP-only metadata: the source playlist + an honest account of what was
+    // dropped, so the UI can surface it (the /api/route contract is otherwise
+    // untouched, and route/explore callers just ignore this field).
+    source: {
+      name: typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : null,
+      placed: resolved.length,
+      requested: norm.length,
+      truncated,
+      unresolved,
+    },
+  };
+}
+
 // ---- HTTP plumbing ---------------------------------------------------------
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -737,6 +939,70 @@ function openApiSpec(origin: string) {
             },
             "400": errorResponse,
             "422": errorResponse,
+          },
+        },
+      },
+      "/api/arrange": {
+        post: {
+          summary: "Re-order your own playlist into a journey (BYOP)",
+          description:
+            "Takes a fixed list of Spotify track uris/ids and re-orders them into " +
+            "the lowest-cost journey across the taste map — keeping every track (no " +
+            "adds, no drops). Response matches /api/route (path = your tracks in the " +
+            "chosen order, cloud = their neighbors) plus a `source` block reporting " +
+            "how many tracks were placed and anything that couldn't be. Capped at " +
+            `${BYOP_MAX_TRACKS} tracks, of which up to ${BYOP_MAX_COLDSTART} may be cold-started.`,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["uris"],
+                  properties: {
+                    uris: { type: "array", items: { type: "string" }, example: ["spotify:track:7b4fQNd34RVNFKKziQz6mS", "spotify:track:3IvodZAm4vD1PM3bIEw9Ik"] },
+                    name: { type: "string", description: "Source playlist name (used for the saved playlist)." },
+                    context: { type: "string", default: "now" },
+                    shuffle: { type: "string", default: "any" },
+                  },
+                },
+              },
+            },
+          },
+          responses: { "200": okRoute, "400": errorResponse, "422": errorResponse },
+        },
+      },
+      "/api/playlist": {
+        get: {
+          summary: "Read a public playlist's tracks (BYOP)",
+          description:
+            "Returns a public, user-made playlist's track uris via the app's " +
+            "client-credentials token. Private, collaborative, and Spotify editorial " +
+            "playlists are not readable this way (use the account-connect path).",
+          parameters: [
+            { name: "url", in: "query", schema: { type: "string" }, description: "Playlist link, spotify:playlist: uri, or bare id.", example: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" },
+            { name: "id", in: "query", schema: { type: "string" }, description: "Alternative to url." },
+          ],
+          responses: {
+            "200": {
+              description: "The playlist name and its track uris.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: "string" },
+                      total: { type: "integer" },
+                      uris: { type: "array", items: { type: "string" } },
+                      tracks: { type: "array", items: { type: "object", properties: { uri: { type: "string" }, name: { type: "string" }, artist: { type: "string" } } } },
+                    },
+                  },
+                },
+              },
+            },
+            "400": errorResponse,
+            "404": errorResponse,
           },
         },
       },
@@ -956,6 +1222,18 @@ export default {
         if (url.pathname === "/api/embed" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
           return json(await buildEmbed(env, payload, state));
+        }
+        // BYOP: re-order a user's own playlist into a journey (same response
+        // shape as /api/route, plus a `source` block).
+        if (url.pathname === "/api/arrange" && request.method === "POST") {
+          const payload = await request.json().catch(() => ({}));
+          return json(await buildArrange(env, payload, state));
+        }
+        // BYOP: read a PUBLIC playlist's tracks by url/id (client-credentials).
+        if (url.pathname === "/api/playlist" && request.method === "GET") {
+          const src = url.searchParams.get("url") ?? url.searchParams.get("id");
+          if (!src) throw new ApiError(400, "url or id query param is required");
+          return json(await fetchPublicPlaylist(env, src));
         }
         return json({ error: "not found" }, 404);
       } catch (e: any) {
