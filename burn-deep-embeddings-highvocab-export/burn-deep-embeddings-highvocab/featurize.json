@@ -1,0 +1,2999 @@
+{
+  "schema_version": 1,
+  "n_cols": 497,
+  "embedding_dim": 64,
+  "pca": {
+    "dims": 64,
+    "mean": [
+      0.0034452484,
+      0.21688524,
+      -0.027041111,
+      0.00665795,
+      0.21567467,
+      -0.031239213,
+      0.0041379468,
+      -0.038408607,
+      0.02030445,
+      -0.020023769,
+      0.15358785,
+      0.058275044,
+      0.040464316,
+      -0.23928769,
+      0.06856991,
+      0.04518496,
+      0.030154288,
+      -0.0019848626,
+      0.039595786,
+      0.013007133,
+      0.087916605,
+      0.04433512,
+      -0.014879697,
+      0.03303278,
+      0.01850821,
+      -0.11092523,
+      -0.007098924,
+      0.009937879,
+      0.027894372,
+      -0.19628154,
+      -0.0037935392,
+      -0.0058957296,
+      0.014988715,
+      0.039765913,
+      0.019359864,
+      -0.015801782,
+      0.07711955,
+      0.015882382,
+      -0.049613148,
+      0.10316628,
+      -0.009374303,
+      -0.016047603,
+      -0.007288723,
+      0.013222531,
+      0.0023204135,
+      -0.06819184,
+      -0.023210257,
+      0.038062945,
+      -0.1569757,
+      0.010766168,
+      0.16618751,
+      -0.044937257,
+      -0.057852514,
+      0.17709816,
+      0.014794469,
+      -0.0007003758,
+      0.0051642666,
+      0.23573524,
+      0.07307286,
+      -0.027473534,
+      0.0018522185,
+      -0.03872104,
+      -0.10978041,
+      -0.000007694437
+    ],
+    "components_file": "pca_components.f32",
+    "components_shape": [
+      64,
+      64
+    ]
+  },
+  "columns": [
+    {
+      "op": "pca",
+      "component": 0
+    },
+    {
+      "op": "pca",
+      "component": 1
+    },
+    {
+      "op": "pca",
+      "component": 2
+    },
+    {
+      "op": "pca",
+      "component": 3
+    },
+    {
+      "op": "pca",
+      "component": 4
+    },
+    {
+      "op": "pca",
+      "component": 5
+    },
+    {
+      "op": "pca",
+      "component": 6
+    },
+    {
+      "op": "pca",
+      "component": 7
+    },
+    {
+      "op": "pca",
+      "component": 8
+    },
+    {
+      "op": "pca",
+      "component": 9
+    },
+    {
+      "op": "pca",
+      "component": 10
+    },
+    {
+      "op": "pca",
+      "component": 11
+    },
+    {
+      "op": "pca",
+      "component": 12
+    },
+    {
+      "op": "pca",
+      "component": 13
+    },
+    {
+      "op": "pca",
+      "component": 14
+    },
+    {
+      "op": "pca",
+      "component": 15
+    },
+    {
+      "op": "pca",
+      "component": 16
+    },
+    {
+      "op": "pca",
+      "component": 17
+    },
+    {
+      "op": "pca",
+      "component": 18
+    },
+    {
+      "op": "pca",
+      "component": 19
+    },
+    {
+      "op": "pca",
+      "component": 20
+    },
+    {
+      "op": "pca",
+      "component": 21
+    },
+    {
+      "op": "pca",
+      "component": 22
+    },
+    {
+      "op": "pca",
+      "component": 23
+    },
+    {
+      "op": "pca",
+      "component": 24
+    },
+    {
+      "op": "pca",
+      "component": 25
+    },
+    {
+      "op": "pca",
+      "component": 26
+    },
+    {
+      "op": "pca",
+      "component": 27
+    },
+    {
+      "op": "pca",
+      "component": 28
+    },
+    {
+      "op": "pca",
+      "component": 29
+    },
+    {
+      "op": "pca",
+      "component": 30
+    },
+    {
+      "op": "pca",
+      "component": 31
+    },
+    {
+      "op": "pca",
+      "component": 32
+    },
+    {
+      "op": "pca",
+      "component": 33
+    },
+    {
+      "op": "pca",
+      "component": 34
+    },
+    {
+      "op": "pca",
+      "component": 35
+    },
+    {
+      "op": "pca",
+      "component": 36
+    },
+    {
+      "op": "pca",
+      "component": 37
+    },
+    {
+      "op": "pca",
+      "component": 38
+    },
+    {
+      "op": "pca",
+      "component": 39
+    },
+    {
+      "op": "pca",
+      "component": 40
+    },
+    {
+      "op": "pca",
+      "component": 41
+    },
+    {
+      "op": "pca",
+      "component": 42
+    },
+    {
+      "op": "pca",
+      "component": 43
+    },
+    {
+      "op": "pca",
+      "component": 44
+    },
+    {
+      "op": "pca",
+      "component": 45
+    },
+    {
+      "op": "pca",
+      "component": 46
+    },
+    {
+      "op": "pca",
+      "component": 47
+    },
+    {
+      "op": "pca",
+      "component": 48
+    },
+    {
+      "op": "pca",
+      "component": 49
+    },
+    {
+      "op": "pca",
+      "component": 50
+    },
+    {
+      "op": "pca",
+      "component": 51
+    },
+    {
+      "op": "pca",
+      "component": 52
+    },
+    {
+      "op": "pca",
+      "component": 53
+    },
+    {
+      "op": "pca",
+      "component": 54
+    },
+    {
+      "op": "pca",
+      "component": 55
+    },
+    {
+      "op": "pca",
+      "component": 56
+    },
+    {
+      "op": "pca",
+      "component": 57
+    },
+    {
+      "op": "pca",
+      "component": 58
+    },
+    {
+      "op": "pca",
+      "component": 59
+    },
+    {
+      "op": "pca",
+      "component": 60
+    },
+    {
+      "op": "pca",
+      "component": 61
+    },
+    {
+      "op": "pca",
+      "component": 62
+    },
+    {
+      "op": "pca",
+      "component": 63
+    },
+    {
+      "op": "numeric_present_raw",
+      "field": "artist_popularity"
+    },
+    {
+      "op": "numeric_missing_flag",
+      "field": "artist_popularity"
+    },
+    {
+      "op": "numeric_present_raw",
+      "field": "track_popularity"
+    },
+    {
+      "op": "numeric_missing_flag",
+      "field": "track_popularity"
+    },
+    {
+      "op": "numeric_log1p",
+      "field": "artist_followers"
+    },
+    {
+      "op": "numeric_verbatim",
+      "field": "release_year"
+    },
+    {
+      "op": "numeric_verbatim",
+      "field": "artist_count"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "unknown"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative dance"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "downtempo"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "big beat"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "album rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative metal"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electronica"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dance pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "ambient"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "idm"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "art pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "minimal techno"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dusseldorf electronic"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "lo-fi house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "indie rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "jazz house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "uk garage"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "melodic techno"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "reggaeton"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "deep house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "cumbia pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "brooklyn indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electronica argentina"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "modern rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "flamenco"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "indie dance"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "organic house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "trip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "german alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "irish rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "deep disco house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "madchester"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electra"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electro"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "mellow gold"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "abstract"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "stutter house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "french indie pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "house argentino"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "nu jazz"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "melodic house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "art rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "neotango"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "techno"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dark pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "disco house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "horror synth"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "french house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "colombian pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dance rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "r&b en espanol"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "acid house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "tango"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "tech house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "chillhop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "chillwave"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin alternative"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "classic rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "beatlesque"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "classic dubstep"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "afro house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "hip hop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "art punk"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "dub techno"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "cumbia"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "alternative r&b"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "brighton indie"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "reggae fusion"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "plunderphonics"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "electroclash"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "bow pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "australian psych"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "cantautor"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "adult standards"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "compositional ambient"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "edm"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "afrobeat"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "italo disco"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "indie garage rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latin christian"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "lounge"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "progressive house"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "celtic"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "cumbia 420"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "funk"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "garage rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "nu disco"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "american post-rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "baroque pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "britpop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "spoken word"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "israeli techno"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "lullaby"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "argentine reggae"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "disco"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "jazz"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "modern alternative rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "background music"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "gaita zuliana"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "rap underground argentino"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "trap argentino"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "candombe"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "city pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "afrofuturism"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "bedroom pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "blues rock"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "classic soul"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "puerto rican pop"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "punk"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "latintronica"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "post-punk"
+    },
+    {
+      "op": "onehot",
+      "group": "genre_primary",
+      "value": "__other__"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Rammstein"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Babasonicos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kraftwerk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Aphex Twin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Four Tet"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Radiohead"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Underworld"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Thievery Corporation"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Muse"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Moby"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Die Toten Hosen"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gorillaz"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Pink Floyd"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The xx"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Caribou"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DIIV"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nicolas Jaar"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Smiths"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "U2"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Tosca"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DJ Koze"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Led Zeppelin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Stone Roses"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Air"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Everything But The Girl"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Avalanches"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Daft Punk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juana Molina"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kurt Vile"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Peces Raros"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Prodigy"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Floating Points"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Massive Attack"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Chemical Brothers"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gustavo Cerati"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bajofondo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Robag Wruhme"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Portishead"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Mató a un Policía Motorizado"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fred again.."
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jamie xx"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juan Wauters"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kyle Dixon & Michael Stein"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Stereolab"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Depeche Mode"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bonobo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Robbie Williams"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Burial"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Soda Stereo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Blur"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Joy Orbison"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Talking Heads"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Alan Parsons Project"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Usted Señalemelo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bad Bunny"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Daphni"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Roman Flügel"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Boards of Canada"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bloc Party"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Charly García"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DJ Shadow"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Happy Mondays"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Luciano Supervielle"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sven Väth"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Franz Ferdinand"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Squarepusher"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Groove Armada"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Laika Perra Rusa"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Róisín Murphy"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Rival Consoles"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Kooks"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "BADBADNOTGOOD"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Oasis"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "BICEP"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mount Kimbie"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sublime"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Tame Impala"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Varese"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Against All Logic"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gramatik"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nujabes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Future Sound Of London"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Strokes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Barry Can't Swim"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mi Amigo Invencible"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bandalos Chinos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Verve"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Valdovinos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Beck"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jimi Jules"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "New Order"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Grimes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mano Le Tough"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Perez"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Campo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Faithless"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Patricio Rey y sus Redonditos de Ricota"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Arctic Monkeys"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nilüfer Yanya"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "ROSALÍA"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Daddy Yankee"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Drums"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Björk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "CA7RIEL"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Güacho"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The 1975"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Kuelgue"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Guy Gerber"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Lisandro Aristimuño"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Peggy Gou"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bestia Bebé"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Röyksopp"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Astor Piazzolla"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Cuarteto De Nos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Japanese Breakfast"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "L'Impératrice"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Morbo y Mambo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Overmono"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Pulp"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Trikk"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Monolink"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Aerosmith"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "AnnenMayKantereit"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Blondie"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Enya"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jürgen Paape"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Supertramp"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Agoria"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "French 79"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gab Rhome"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "J Balvin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kevin Di Serna"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Maxi Trusso"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Rolling Stones"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Âme"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Giolì & Assia"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Hernan Cattaneo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jon Hopkins"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jon Kennedy"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kruder & Dorfmeister"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "SEATBELTS"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Chromatics"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Plan De La Mariposa"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Eric Clapton"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fianru"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Interpol"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Madvillain"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mamba Suite"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "OFF"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Parcels"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Rosario Bléfari"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Weeknd"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Brian Eno"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Joaquín Sabina"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Las Ligas Menores"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nicola Cruz"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "박혜진 Park Hye Jin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Arcade Fire"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Avalon Emerson"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Axel Boman"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fer Palacio"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fernando Kabusacki"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kevin Kaarl"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Los del Fuego"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "NATHY PELUSO"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Pescado Rabioso"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Pomplamoose"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sui Generis"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Killers"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Who"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Drake"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Erik Satie"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Hans Zimmer"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Herbie Hancock"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Idris Muhammad"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jamiroquai"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Justice"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Maria Becerra"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Metronomy"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ross from Friends"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Avicii"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Beastie Boys"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Blutengel"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "C. Tangana"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Chaim"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Demm Deep"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El príncipe idiota"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fela Kuti"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gerry Read"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Isaiah Rashad"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Justin Bieber"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "KAYTRANADA"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Lilly Wood and The Prick"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Los Abuelos De La Nada"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Red Hot Chili Peppers"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "SidiRum"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Vegyn"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "WOS"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ana Frango Elétrico"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Armand Van Helden"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DAF"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Dancing Mood"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Helado Negro"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "John Maus"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juan Mango"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kasabian"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kings of Convenience"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Los Piojos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Maluma"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Moloko"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nils Frahm"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Porcupine Tree"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Primal Scream"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Susumu Yokota"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Teebs"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Beatles"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "µ-Ziq"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Cultura Profética"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Diosque"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ditian"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gustavo Santaolalla"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "HOMESHAKE"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Lo' Pibitos"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Miss Kittin"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nubya Garcia"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Paco Amoroso"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Phillipi & Rodrigo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Queen"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sofi Tukker"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Virgins"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Toro y Moi"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Utopians"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Virus"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "1915"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Bizarrap"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Courtney Barnett"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DARKSIDE"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DJ Seinfeld"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "David Bowie"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Facundo Mohrr"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Henrik Schwarz"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jeff Buckley"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kelly Lee Owens"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Kosmischer Läufer"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "LOUTA"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Las Taradas"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "MARTIRES DEL COMPAS"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Maribou State"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Nightmares On Wax"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ozuna"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Peter Bjorn and John"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Serú Girán"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Taylor Swift"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Tears For Fears"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The White Stripes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Westbam"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "YELLOW MAGIC ORCHESTRA"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ólafur Arnalds"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "⣎⡇ꉺლ༽இ•̛)ྀ◞ ༎ຶ ༽ৣৢ؞ৢ؞ؖ ꉺლ"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Adam Ten"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Al Green"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Boy Harsher"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fleetwood Mac"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Isla Mujeres"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "James Holden"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Madonna"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Marama"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Perras on the beach"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Quantic"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ryuichi Sakamoto"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Sofia Kourtesis"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "The Sugarcubes"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Un Planeta"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Casino Versus Japan"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Dauwd"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Duki"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Emmanuel Horvilleur"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fold"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fred Nevché"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jaime Sin Tierra"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Jayda G"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Joy Division"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Juan Hansen"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Leon Vynehall"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Luca Bocci"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Maceo Plex"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Miguelichi López"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Mura Masa"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "O'Flynn"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Scala & Kolacny Brothers"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Superpitcher"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "clipping."
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "DJ Alex"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Duke Hugh"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "El Pau"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Fatboy Slim"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Gil Scott-Heron"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Hagop Tchaparian"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "I Monster"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "Ibiza Pareo"
+    },
+    {
+      "op": "onehot",
+      "group": "artist",
+      "value": "__other__"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "album"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "compilation"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "single"
+    },
+    {
+      "op": "onehot",
+      "group": "album_type",
+      "value": "__other__"
+    }
+  ],
+  "column_names": [
+    "pca_0",
+    "pca_1",
+    "pca_2",
+    "pca_3",
+    "pca_4",
+    "pca_5",
+    "pca_6",
+    "pca_7",
+    "pca_8",
+    "pca_9",
+    "pca_10",
+    "pca_11",
+    "pca_12",
+    "pca_13",
+    "pca_14",
+    "pca_15",
+    "pca_16",
+    "pca_17",
+    "pca_18",
+    "pca_19",
+    "pca_20",
+    "pca_21",
+    "pca_22",
+    "pca_23",
+    "pca_24",
+    "pca_25",
+    "pca_26",
+    "pca_27",
+    "pca_28",
+    "pca_29",
+    "pca_30",
+    "pca_31",
+    "pca_32",
+    "pca_33",
+    "pca_34",
+    "pca_35",
+    "pca_36",
+    "pca_37",
+    "pca_38",
+    "pca_39",
+    "pca_40",
+    "pca_41",
+    "pca_42",
+    "pca_43",
+    "pca_44",
+    "pca_45",
+    "pca_46",
+    "pca_47",
+    "pca_48",
+    "pca_49",
+    "pca_50",
+    "pca_51",
+    "pca_52",
+    "pca_53",
+    "pca_54",
+    "pca_55",
+    "pca_56",
+    "pca_57",
+    "pca_58",
+    "pca_59",
+    "pca_60",
+    "pca_61",
+    "pca_62",
+    "pca_63",
+    "artist_popularity",
+    "artist_popularity_missing",
+    "track_popularity",
+    "track_popularity_missing",
+    "artist_followers_log",
+    "release_year",
+    "artist_count",
+    "genre_primary=unknown",
+    "genre_primary=alternative rock",
+    "genre_primary=alternative dance",
+    "genre_primary=argentine indie",
+    "genre_primary=argentine rock",
+    "genre_primary=downtempo",
+    "genre_primary=big beat",
+    "genre_primary=album rock",
+    "genre_primary=alternative metal",
+    "genre_primary=electronica",
+    "genre_primary=argentine alternative rock",
+    "genre_primary=dance pop",
+    "genre_primary=ambient",
+    "genre_primary=idm",
+    "genre_primary=art pop",
+    "genre_primary=minimal techno",
+    "genre_primary=alternative hip hop",
+    "genre_primary=dusseldorf electronic",
+    "genre_primary=lo-fi house",
+    "genre_primary=indie rock",
+    "genre_primary=jazz house",
+    "genre_primary=uk garage",
+    "genre_primary=melodic techno",
+    "genre_primary=reggaeton",
+    "genre_primary=deep house",
+    "genre_primary=cumbia pop",
+    "genre_primary=brooklyn indie",
+    "genre_primary=electronica argentina",
+    "genre_primary=modern rock",
+    "genre_primary=flamenco",
+    "genre_primary=indie dance",
+    "genre_primary=organic house",
+    "genre_primary=trip hop",
+    "genre_primary=latin hip hop",
+    "genre_primary=argentine hip hop",
+    "genre_primary=german alternative rock",
+    "genre_primary=irish rock",
+    "genre_primary=deep disco house",
+    "genre_primary=madchester",
+    "genre_primary=electra",
+    "genre_primary=electro",
+    "genre_primary=mellow gold",
+    "genre_primary=abstract",
+    "genre_primary=stutter house",
+    "genre_primary=french indie pop",
+    "genre_primary=house argentino",
+    "genre_primary=nu jazz",
+    "genre_primary=melodic house",
+    "genre_primary=art rock",
+    "genre_primary=neotango",
+    "genre_primary=techno",
+    "genre_primary=dark pop",
+    "genre_primary=disco house",
+    "genre_primary=horror synth",
+    "genre_primary=french house",
+    "genre_primary=colombian pop",
+    "genre_primary=dance rock",
+    "genre_primary=r&b en espanol",
+    "genre_primary=acid house",
+    "genre_primary=tango",
+    "genre_primary=tech house",
+    "genre_primary=chillhop",
+    "genre_primary=chillwave",
+    "genre_primary=latin alternative",
+    "genre_primary=latin pop",
+    "genre_primary=classic rock",
+    "genre_primary=beatlesque",
+    "genre_primary=classic dubstep",
+    "genre_primary=afro house",
+    "genre_primary=hip hop",
+    "genre_primary=art punk",
+    "genre_primary=dub techno",
+    "genre_primary=cumbia",
+    "genre_primary=alternative r&b",
+    "genre_primary=pop",
+    "genre_primary=brighton indie",
+    "genre_primary=reggae fusion",
+    "genre_primary=plunderphonics",
+    "genre_primary=electroclash",
+    "genre_primary=bow pop",
+    "genre_primary=australian psych",
+    "genre_primary=cantautor",
+    "genre_primary=adult standards",
+    "genre_primary=compositional ambient",
+    "genre_primary=edm",
+    "genre_primary=afrobeat",
+    "genre_primary=italo disco",
+    "genre_primary=indie garage rock",
+    "genre_primary=latin christian",
+    "genre_primary=lounge",
+    "genre_primary=progressive house",
+    "genre_primary=celtic",
+    "genre_primary=cumbia 420",
+    "genre_primary=funk",
+    "genre_primary=garage rock",
+    "genre_primary=nu disco",
+    "genre_primary=american post-rock",
+    "genre_primary=baroque pop",
+    "genre_primary=britpop",
+    "genre_primary=spoken word",
+    "genre_primary=israeli techno",
+    "genre_primary=lullaby",
+    "genre_primary=argentine reggae",
+    "genre_primary=disco",
+    "genre_primary=jazz",
+    "genre_primary=modern alternative rock",
+    "genre_primary=background music",
+    "genre_primary=gaita zuliana",
+    "genre_primary=rap underground argentino",
+    "genre_primary=trap argentino",
+    "genre_primary=candombe",
+    "genre_primary=city pop",
+    "genre_primary=afrofuturism",
+    "genre_primary=bedroom pop",
+    "genre_primary=blues rock",
+    "genre_primary=classic soul",
+    "genre_primary=puerto rican pop",
+    "genre_primary=punk",
+    "genre_primary=latintronica",
+    "genre_primary=post-punk",
+    "genre_primary=__other__",
+    "artist=Rammstein",
+    "artist=Babasonicos",
+    "artist=Kraftwerk",
+    "artist=Aphex Twin",
+    "artist=Four Tet",
+    "artist=Radiohead",
+    "artist=Underworld",
+    "artist=Thievery Corporation",
+    "artist=Muse",
+    "artist=Moby",
+    "artist=Die Toten Hosen",
+    "artist=Gorillaz",
+    "artist=Pink Floyd",
+    "artist=The xx",
+    "artist=Caribou",
+    "artist=DIIV",
+    "artist=Nicolas Jaar",
+    "artist=The Smiths",
+    "artist=U2",
+    "artist=Tosca",
+    "artist=DJ Koze",
+    "artist=Led Zeppelin",
+    "artist=The Stone Roses",
+    "artist=Air",
+    "artist=Everything But The Girl",
+    "artist=The Avalanches",
+    "artist=Daft Punk",
+    "artist=Juana Molina",
+    "artist=Kurt Vile",
+    "artist=Peces Raros",
+    "artist=The Prodigy",
+    "artist=Floating Points",
+    "artist=Massive Attack",
+    "artist=The Chemical Brothers",
+    "artist=Gustavo Cerati",
+    "artist=Bajofondo",
+    "artist=Robag Wruhme",
+    "artist=Portishead",
+    "artist=El Mató a un Policía Motorizado",
+    "artist=Fred again..",
+    "artist=Jamie xx",
+    "artist=Juan Wauters",
+    "artist=Kyle Dixon & Michael Stein",
+    "artist=Stereolab",
+    "artist=Depeche Mode",
+    "artist=Bonobo",
+    "artist=Robbie Williams",
+    "artist=Burial",
+    "artist=Soda Stereo",
+    "artist=Blur",
+    "artist=Joy Orbison",
+    "artist=Talking Heads",
+    "artist=The Alan Parsons Project",
+    "artist=Usted Señalemelo",
+    "artist=Bad Bunny",
+    "artist=Daphni",
+    "artist=Roman Flügel",
+    "artist=Boards of Canada",
+    "artist=Bloc Party",
+    "artist=Charly García",
+    "artist=DJ Shadow",
+    "artist=Happy Mondays",
+    "artist=Luciano Supervielle",
+    "artist=Sven Väth",
+    "artist=Franz Ferdinand",
+    "artist=Squarepusher",
+    "artist=Groove Armada",
+    "artist=Laika Perra Rusa",
+    "artist=Róisín Murphy",
+    "artist=Rival Consoles",
+    "artist=The Kooks",
+    "artist=BADBADNOTGOOD",
+    "artist=Oasis",
+    "artist=BICEP",
+    "artist=Mount Kimbie",
+    "artist=Sublime",
+    "artist=Tame Impala",
+    "artist=Varese",
+    "artist=Against All Logic",
+    "artist=Gramatik",
+    "artist=Nujabes",
+    "artist=The Future Sound Of London",
+    "artist=The Strokes",
+    "artist=Barry Can't Swim",
+    "artist=Mi Amigo Invencible",
+    "artist=Bandalos Chinos",
+    "artist=The Verve",
+    "artist=Valdovinos",
+    "artist=Beck",
+    "artist=Jimi Jules",
+    "artist=New Order",
+    "artist=Grimes",
+    "artist=Mano Le Tough",
+    "artist=Perez",
+    "artist=Campo",
+    "artist=Faithless",
+    "artist=Patricio Rey y sus Redonditos de Ricota",
+    "artist=Arctic Monkeys",
+    "artist=Nilüfer Yanya",
+    "artist=ROSALÍA",
+    "artist=Daddy Yankee",
+    "artist=The Drums",
+    "artist=Björk",
+    "artist=CA7RIEL",
+    "artist=Güacho",
+    "artist=The 1975",
+    "artist=El Kuelgue",
+    "artist=Guy Gerber",
+    "artist=Lisandro Aristimuño",
+    "artist=Peggy Gou",
+    "artist=Bestia Bebé",
+    "artist=Röyksopp",
+    "artist=Astor Piazzolla",
+    "artist=El Cuarteto De Nos",
+    "artist=Japanese Breakfast",
+    "artist=L'Impératrice",
+    "artist=Morbo y Mambo",
+    "artist=Overmono",
+    "artist=Pulp",
+    "artist=Trikk",
+    "artist=Monolink",
+    "artist=Aerosmith",
+    "artist=AnnenMayKantereit",
+    "artist=Blondie",
+    "artist=Enya",
+    "artist=Jürgen Paape",
+    "artist=Supertramp",
+    "artist=Agoria",
+    "artist=French 79",
+    "artist=Gab Rhome",
+    "artist=J Balvin",
+    "artist=Kevin Di Serna",
+    "artist=Maxi Trusso",
+    "artist=The Rolling Stones",
+    "artist=Âme",
+    "artist=Giolì & Assia",
+    "artist=Hernan Cattaneo",
+    "artist=Jon Hopkins",
+    "artist=Jon Kennedy",
+    "artist=Kruder & Dorfmeister",
+    "artist=SEATBELTS",
+    "artist=Chromatics",
+    "artist=El Plan De La Mariposa",
+    "artist=Eric Clapton",
+    "artist=Fianru",
+    "artist=Interpol",
+    "artist=Madvillain",
+    "artist=Mamba Suite",
+    "artist=OFF",
+    "artist=Parcels",
+    "artist=Rosario Bléfari",
+    "artist=The Weeknd",
+    "artist=Brian Eno",
+    "artist=Joaquín Sabina",
+    "artist=Las Ligas Menores",
+    "artist=Nicola Cruz",
+    "artist=박혜진 Park Hye Jin",
+    "artist=Arcade Fire",
+    "artist=Avalon Emerson",
+    "artist=Axel Boman",
+    "artist=Fer Palacio",
+    "artist=Fernando Kabusacki",
+    "artist=Kevin Kaarl",
+    "artist=Los del Fuego",
+    "artist=NATHY PELUSO",
+    "artist=Pescado Rabioso",
+    "artist=Pomplamoose",
+    "artist=Sui Generis",
+    "artist=The Killers",
+    "artist=The Who",
+    "artist=Drake",
+    "artist=Erik Satie",
+    "artist=Hans Zimmer",
+    "artist=Herbie Hancock",
+    "artist=Idris Muhammad",
+    "artist=Jamiroquai",
+    "artist=Justice",
+    "artist=Maria Becerra",
+    "artist=Metronomy",
+    "artist=Ross from Friends",
+    "artist=Avicii",
+    "artist=Beastie Boys",
+    "artist=Blutengel",
+    "artist=C. Tangana",
+    "artist=Chaim",
+    "artist=Demm Deep",
+    "artist=El príncipe idiota",
+    "artist=Fela Kuti",
+    "artist=Gerry Read",
+    "artist=Isaiah Rashad",
+    "artist=Justin Bieber",
+    "artist=KAYTRANADA",
+    "artist=Lilly Wood and The Prick",
+    "artist=Los Abuelos De La Nada",
+    "artist=Red Hot Chili Peppers",
+    "artist=SidiRum",
+    "artist=Vegyn",
+    "artist=WOS",
+    "artist=Ana Frango Elétrico",
+    "artist=Armand Van Helden",
+    "artist=DAF",
+    "artist=Dancing Mood",
+    "artist=Helado Negro",
+    "artist=John Maus",
+    "artist=Juan Mango",
+    "artist=Kasabian",
+    "artist=Kings of Convenience",
+    "artist=Los Piojos",
+    "artist=Maluma",
+    "artist=Moloko",
+    "artist=Nils Frahm",
+    "artist=Porcupine Tree",
+    "artist=Primal Scream",
+    "artist=Susumu Yokota",
+    "artist=Teebs",
+    "artist=The Beatles",
+    "artist=µ-Ziq",
+    "artist=Cultura Profética",
+    "artist=Diosque",
+    "artist=Ditian",
+    "artist=Gustavo Santaolalla",
+    "artist=HOMESHAKE",
+    "artist=Lo' Pibitos",
+    "artist=Miss Kittin",
+    "artist=Nubya Garcia",
+    "artist=Paco Amoroso",
+    "artist=Phillipi & Rodrigo",
+    "artist=Queen",
+    "artist=Sofi Tukker",
+    "artist=The Virgins",
+    "artist=Toro y Moi",
+    "artist=Utopians",
+    "artist=Virus",
+    "artist=1915",
+    "artist=Bizarrap",
+    "artist=Courtney Barnett",
+    "artist=DARKSIDE",
+    "artist=DJ Seinfeld",
+    "artist=David Bowie",
+    "artist=Facundo Mohrr",
+    "artist=Henrik Schwarz",
+    "artist=Jeff Buckley",
+    "artist=Kelly Lee Owens",
+    "artist=Kosmischer Läufer",
+    "artist=LOUTA",
+    "artist=Las Taradas",
+    "artist=MARTIRES DEL COMPAS",
+    "artist=Maribou State",
+    "artist=Nightmares On Wax",
+    "artist=Ozuna",
+    "artist=Peter Bjorn and John",
+    "artist=Serú Girán",
+    "artist=Taylor Swift",
+    "artist=Tears For Fears",
+    "artist=The White Stripes",
+    "artist=Westbam",
+    "artist=YELLOW MAGIC ORCHESTRA",
+    "artist=Ólafur Arnalds",
+    "artist=⣎⡇ꉺლ༽இ•̛)ྀ◞ ༎ຶ ༽ৣৢ؞ৢ؞ؖ ꉺლ",
+    "artist=Adam Ten",
+    "artist=Al Green",
+    "artist=Boy Harsher",
+    "artist=Fleetwood Mac",
+    "artist=Isla Mujeres",
+    "artist=James Holden",
+    "artist=Madonna",
+    "artist=Marama",
+    "artist=Perras on the beach",
+    "artist=Quantic",
+    "artist=Ryuichi Sakamoto",
+    "artist=Sofia Kourtesis",
+    "artist=The Sugarcubes",
+    "artist=Un Planeta",
+    "artist=Casino Versus Japan",
+    "artist=Dauwd",
+    "artist=Duki",
+    "artist=Emmanuel Horvilleur",
+    "artist=Fold",
+    "artist=Fred Nevché",
+    "artist=Jaime Sin Tierra",
+    "artist=Jayda G",
+    "artist=Joy Division",
+    "artist=Juan Hansen",
+    "artist=Leon Vynehall",
+    "artist=Luca Bocci",
+    "artist=Maceo Plex",
+    "artist=Miguelichi López",
+    "artist=Mura Masa",
+    "artist=O'Flynn",
+    "artist=Scala & Kolacny Brothers",
+    "artist=Superpitcher",
+    "artist=clipping.",
+    "artist=DJ Alex",
+    "artist=Duke Hugh",
+    "artist=El Pau",
+    "artist=Fatboy Slim",
+    "artist=Gil Scott-Heron",
+    "artist=Hagop Tchaparian",
+    "artist=I Monster",
+    "artist=Ibiza Pareo",
+    "artist=__other__",
+    "album_type=album",
+    "album_type=compilation",
+    "album_type=single",
+    "album_type=__other__"
+  ],
+  "target": {
+    "field": "metadata.rotation",
+    "transform": "none",
+    "clamp_nonnegative": true
+  }
+}

@@ -18,3 +18,7 @@ public/data.bak-*/
 # Build artifacts
 __pycache__/
 *.tsbuildinfo
+
+# Vendored third-party reference clone (its own repo: foxy-dev1/Spotify-mcp-server);
+# not part of the build. Re-clone if needed.
+Spotify-mcp-server/

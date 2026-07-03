@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "format": "onnx",
+  "producer": "lensing/burn-deep-classifier",
+  "framework_version": "0.1.0",
+  "model": {
+    "name": "burn-deep-embeddings-highvocab",
+    "run_id": "run-20260612-171704-751a2-burn-deep-classifier",
+    "predictor": "burn-deep-classifier",
+    "dataset_id": "ds-20260612-143014-p64-s42",
+    "created_at": "2026-06-12T17:17:34.973081931+00:00",
+    "notes": "ANN champion for the app rotation-fit scorer (high-vocab embeddings)"
+  },
+  "target": {
+    "field": "metadata.rotation",
+    "transform": "none",
+    "task": "binary"
+  },
+  "n_features": 497,
+  "embedding_dim": 64,
+  "ensemble": false,
+  "files": [
+    "README.md",
+    "featurize.json",
+    "input-schema.json",
+    "lensing-export.json",
+    "model.onnx",
+    "pca_components.f32"
+  ]
+}
