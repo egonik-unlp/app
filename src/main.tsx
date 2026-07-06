@@ -22,8 +22,10 @@ import {
   Route as RouteIcon,
   Search,
   Shuffle,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
+  Wind,
   X,
 } from "lucide-react";
 import * as THREE from "three";
@@ -64,7 +66,7 @@ type TrackNode = {
   // 4th principal coordinate (the variance the 3-D map discards) — present on
   // route path nodes; drives the optional "4th-dimension shadow".
   w?: number;
-  kind: "path" | "requested" | "cloud" | "sample";
+  kind: "path" | "requested" | "cloud" | "sample" | "drift";
   snapped_to?: string | null;
   snapped_label?: string | null;
   why?: WhyHop | null;
@@ -76,6 +78,34 @@ type Edge = { from: string; to: string; kind: "path" | "snap" };
 type EmbedResponse = {
   track: TrackNode;
   cloud: TrackNode[];
+};
+
+// Drift: explore the corpus by musical *intent*, no song named. The listener
+// turns music-forward dials (an "air", how wide, and temperament); the server
+// translates that into a corpus query and returns a coherent constellation. The
+// construction is hidden; the intent is musical; the result — below — is legible.
+type GenreCount = { name: string; count: number };
+// The tuning spec: an explicit blend of genres + three concrete dials. `preset`
+// remembers which air last filled the blend (for the title); it's cleared the
+// moment the listener edits the genres by hand.
+type DriftSpec = {
+  genres: string[];
+  familiarity: number; // 0 mainstream · 1 deep cuts
+  focus: number; // 0 strictly these genres · 1 let it wander
+  count: number; // how many stars to gather
+  preset?: string;
+};
+type DriftResponse = {
+  label: string;
+  genresIn: string[];
+  familiarity: number;
+  focus: number;
+  requested: number;
+  seed: number;
+  pooled: number;
+  count: number;
+  genres: GenreCount[];
+  tracks: TrackNode[];
 };
 
 // BYOP: what the arrange endpoint reports about the imported playlist — the
@@ -485,6 +515,53 @@ const easeInOutCubic = (t: number) =>
 
 const SIGNAL = "#ff3d81"; // the journey — hot magenta
 const COOL = "#21e6ff"; // snap / cold-start links — electric cyan
+
+// The Drift "airs": the music-forward feels the listener chooses among. Keys
+// match the Worker's AIRS map; each carries a legible one-line descriptor and a
+// hue that colours its chip + the constellation's guiding glow. Order is the
+// grid order. The genre plumbing behind each air lives in the Worker, hidden.
+// Airs are quick-start *presets* now, not a black box: picking one fills the
+// blend with the actual genres it stands for (matched against the live catalog),
+// which the listener then tunes by hand. `match` = the genre substrings the
+// preset expands to. Kept in step with the Worker's AIRS map.
+type Air = { key: string; label: string; note: string; hue: string; match: string[] };
+const AIRS: Air[] = [
+  { key: "nocturne", label: "Nocturne", note: "after midnight — deep, downtempo, dim", hue: "#7c6cff",
+    match: ["downtempo", "trip hop", "chillwave", "chillhop", "lo-fi house", "jazz house", "deep house", "ambient", "organic house", "dub techno", "minimal", "melodic house", "melodic techno", "nu jazz", "balearic", "chill", "lounge", "abstract"] },
+  { key: "aurora", label: "Aurora", note: "bright, weightless pop and dream", hue: "#5cffd8",
+    match: ["dance pop", "art pop", "dream pop", "synthpop", "indie pop", "chamber pop", "baroque pop", "city pop", "bedroom pop", "jangle", "power pop", "twee", "ambient pop", "folk-pop", "sunshine", "shibuya-kei", "beatlesque", "electropop"] },
+  { key: "kinetic", label: "Kinetic", note: "restless, propulsive, dancefloor", hue: "#ff2bd6",
+    match: ["alternative dance", "big beat", "idm", "techno", "tech house", "acid house", "breakbeat", "jungle", "uk garage", "indie dance", "electro", "drum and bass", "dance-punk", "dance rock", "edm", "hard house", "rave", "electroclash", "hip house", "filter house", "disco house", "nu disco", "big room", "eurodance"] },
+  { key: "hearth", label: "Hearth", note: "warm rock, folk, and voices", hue: "#ff9d2b",
+    match: ["alternative rock", "argentine rock", "album rock", "classic rock", "indie rock", "art rock", "garage rock", "blues", "folk", "singer-songwriter", "americana", "britpop", "post-punk", "new wave", "rock en", "mellow gold", "art punk", "psych", "soul", "funk", "madchester", "permanent wave"] },
+  { key: "undertow", label: "Undertow", note: "heavy, dark, cavernous", hue: "#8aa0d6",
+    match: ["metal", "industrial", "darkwave", "dark wave", "cold wave", "ebm", "horror synth", "dark ambient", "drone", "gothic", "doom", "sludge", "stoner", "hardcore", "post-hardcore", "death", "noise", "witch house", "neue deutsche harte", "cyberpunk", "post-punk"] },
+  { key: "meridian", label: "Meridian", note: "Latin heat — cumbia, tango, reggaetón", hue: "#ff5c5c",
+    match: ["reggaeton", "cumbia", "tango", "flamenco", "bachata", "salsa", "latin", "trap argentino", "neoperreo", "rkt", "cuarteto", "candombe", "tropical", "perreo", "dembow", "bolero", "chamamé", "murga", "bandoneon", "neotango", "folklore argentino", "techengue"] },
+];
+const airOf = (key: string): Air => AIRS.find((a) => a.key === key) ?? AIRS[0];
+
+// The genres a preset seeds the blend with: the most-populated few that match its
+// family (catalog is count-sorted), so it's a clean, high-signal starting point —
+// not every long-tail genre — that the listener then tunes by hand.
+const AIR_PRESET_GENRES = 7;
+const airGenres = (air: Air, catalog: GenreCount[]): string[] =>
+  catalog
+    .filter((g) => air.match.some((m) => g.name.includes(m)))
+    .slice(0, AIR_PRESET_GENRES)
+    .map((g) => g.name);
+
+const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+// A short human name for the current blend: the preset if one is active, else the
+// single genre, else a count.
+const blendTitle = (spec: DriftSpec): string =>
+  spec.preset
+    ? airOf(spec.preset).label
+    : spec.genres.length === 0
+      ? "A blend"
+      : spec.genres.length === 1
+        ? titleCase(spec.genres[0])
+        : `${spec.genres.length} genres`;
 
 // ---------------------------------------------------------------------------
 // The envelope — gather nearby tracks around the route.
@@ -1134,12 +1211,53 @@ function App() {
 
   // two modes: trace a route between two songs, or explore one song's
   // neighborhood in the shared embedding space.
-  const [mode, setMode] = useState<"route" | "explore" | "playlist" | "byop">(
-    "route",
-  );
+  const [mode, setMode] = useState<
+    "route" | "explore" | "playlist" | "byop" | "drift"
+  >("route");
   const [solo, setSolo] = useState<Candidate | null>(null);
   const [embed, setEmbed] = useState<EmbedResponse | null>(null);
   const [embedding, setEmbedding] = useState(false);
+  // Drift: explore by musical intent. `driftSpec` holds the blend + dials; `drift`
+  // is the constellation the last Wander gathered; `drifting` gates the request.
+  const [driftSpec, setDriftSpec] = useState<DriftSpec>({
+    genres: [],
+    familiarity: 0.35,
+    focus: 0.3,
+    count: 100,
+    preset: "nocturne",
+  });
+  const [drift, setDrift] = useState<DriftResponse | null>(null);
+  const [drifting, setDrifting] = useState(false);
+  // The tuning workbench is tall; once a constellation is cast we collapse it to a
+  // slim bar so the map is the hero, and reopen on demand ("Tune"). Always open on
+  // mobile (the controls live in their own bottom-sheet over the map) and before
+  // the first cast (you need the controls to make one).
+  const [driftTuneOpen, setDriftTuneOpen] = useState(true);
+  // The tuning catalog (every genre + track count), fetched once the listener
+  // first opens Drift. Feeds the genre picker and the live pool-size readout.
+  const [genreCatalog, setGenreCatalog] = useState<GenreCount[] | null>(null);
+  useEffect(() => {
+    if (mode !== "drift" || genreCatalog) return;
+    let alive = true;
+    request<GenreCount[]>("/api/genres")
+      .then((c) => alive && setGenreCatalog(c))
+      .catch(() => {
+        /* picker falls back to preset-only if the catalog can't load */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, genreCatalog]);
+  // Once the catalog lands, seed an empty blend from the default preset so Drift
+  // is ready to wander without the listener having to pick genres first.
+  useEffect(() => {
+    if (!genreCatalog) return;
+    setDriftSpec((s) => {
+      if (s.genres.length) return s;
+      const air = airOf(s.preset ?? "nocturne");
+      return { ...s, genres: airGenres(air, genreCatalog), preset: air.key };
+    });
+  }, [genreCatalog]);
   // BYOP: re-ordering a user's own playlist. `arranging` gates the request; the
   // arranged result reuses `route` (same shape), so the whole composer/save
   // pipeline consumes it unchanged. `originMode` remembers where the composer
@@ -1278,6 +1396,7 @@ function App() {
     setFocus(null);
     setInspect(null);
     setEmbed(null);
+    setDrift(null);
     try {
       const data = await request<RouteResponse>(
         "/api/route",
@@ -1329,6 +1448,7 @@ function App() {
     setFocus(null);
     setInspect(null);
     setRoute(null);
+    setDrift(null);
     try {
       const data = await request<EmbedResponse>("/api/embed", post({ uri }));
       setEmbed(data);
@@ -1350,7 +1470,50 @@ function App() {
   const useAsStart = (n: TrackNode) => {
     setMode("route");
     setEmbed(null);
+    setDrift(null);
     setStart(candidateFromNode(n));
+  };
+
+  // Drift: translate the musical dials into a corpus query and gather a
+  // constellation. The same spec on repeat ("Wander again") reseeds server-side,
+  // so each cast is a fresh sky within the chosen intent.
+  const runDrift = async (spec: DriftSpec) => {
+    if (drifting) return;
+    setMode("drift");
+    setDriftSpec(spec);
+    setDrifting(true);
+    setError(null);
+    setFocus(null);
+    setInspect(null);
+    setEmbed(null);
+    setRoute(null);
+    try {
+      const data = await request<DriftResponse>(
+        "/api/drift",
+        post({
+          genres: spec.genres,
+          familiarity: spec.familiarity,
+          focus: spec.focus,
+          count: spec.count,
+          air: spec.preset, // fallback the server uses only if genres is empty
+        }),
+      );
+      setDrift(data);
+      setDriftTuneOpen(false); // collapse the workbench so the constellation shows
+      setComposerOpen(false); // collapse the mobile sheet so the sky reveals
+    } catch (e) {
+      const cpuLimited =
+        e instanceof ApiError && (e.status === 503 || e.status === 524);
+      setError(
+        cpuLimited
+          ? "The map was busy gathering that sky — give it a moment and wander again."
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
+    } finally {
+      setDrifting(false);
+    }
   };
 
   // BYOP: re-order an imported playlist into a journey. The response is
@@ -1364,6 +1527,7 @@ function App() {
     setFocus(null);
     setInspect(null);
     setEmbed(null);
+    setDrift(null);
     try {
       const data = await request<RouteResponse>(
         "/api/arrange",
@@ -1435,22 +1599,27 @@ function App() {
         ? route?.source?.name
           ? `Your playlist · ${route.source.name}`
           : "Bring your own playlist"
-        : mode === "route"
-          ? start && end
-            ? `${start.name} → ${end.name}`
-            : start
-              ? `${start.name} → choose a destination`
-              : "Trace a journey between two songs"
-          : solo
-            ? solo.name
-            : "Explore one song’s neighbourhood";
+        : mode === "drift"
+          ? drift
+            ? `${blendTitle(driftSpec)} · ${drift.count} songs`
+            : `Drift · ${blendTitle(driftSpec)}`
+          : mode === "route"
+            ? start && end
+              ? `${start.name} → ${end.name}`
+              : start
+                ? `${start.name} → choose a destination`
+                : "Trace a journey between two songs"
+            : solo
+              ? solo.name
+              : "Explore one song’s neighbourhood";
 
   return (
     <main className="app">
       <Scene
         route={route}
         embed={embed}
-        idle={!route && !embed}
+        drift={drift}
+        idle={!route && !embed && !drift}
         focus={focus}
         onFocus={setFocus}
         onInspect={setInspect}
@@ -1489,6 +1658,8 @@ function App() {
               <RouteIcon size={15} />
             ) : mode === "byop" ? (
               <ListMusic size={15} />
+            ) : mode === "drift" ? (
+              <Wind size={15} />
             ) : (
               <Orbit size={15} />
             )}
@@ -1508,7 +1679,9 @@ function App() {
                 ? "Trace a journey"
                 : mode === "byop"
                   ? "Bring your own playlist"
-                  : "Explore a song"}
+                  : mode === "drift"
+                    ? "Drift by feel"
+                    : "Explore a song"}
             </span>
             <button
               className="sheetClose"
@@ -1538,6 +1711,14 @@ function App() {
                 onClick={() => setMode("explore")}
               >
                 <Orbit size={14} aria-hidden /> <span>Explore</span>
+              </button>
+              <button
+                role="tab"
+                className={mode === "drift" ? "on" : ""}
+                aria-selected={mode === "drift"}
+                onClick={() => setMode("drift")}
+              >
+                <Wind size={14} aria-hidden /> <span>Drift</span>
               </button>
               <button
                 role="tab"
@@ -1604,6 +1785,18 @@ function App() {
                 <span>{embedding ? "Scanning" : "Explore"}</span>
               </button>
             </>
+          ) : mode === "drift" ? (
+            <DriftPanel
+              spec={driftSpec}
+              catalog={genreCatalog}
+              onChange={setDriftSpec}
+              onWander={() => void runDrift(driftSpec)}
+              busy={drifting}
+              cast={!!drift}
+              open={isMobile || !drift || driftTuneOpen}
+              collapsible={!isMobile && !!drift}
+              onToggleOpen={() => setDriftTuneOpen((o) => !o)}
+            />
           ) : mode === "byop" ? (
             <ByopPanel
               auth={auth}
@@ -1640,10 +1833,16 @@ function App() {
         aria-hidden
       />
 
-      {!route && !embed && status === "idle" && !arranging && (
+      {!route && !embed && !drift && !drifting && status === "idle" && !arranging && (
         <Intro
           mode={mode}
-          ready={mode === "route" ? !!start && !!end : !!solo}
+          ready={
+            mode === "route"
+              ? !!start && !!end
+              : mode === "drift"
+                ? true
+                : !!solo
+          }
           compact={isMobile}
         />
       )}
@@ -1656,7 +1855,9 @@ function App() {
               ? "explore that track"
               : mode === "byop"
                 ? "arrange that playlist"
-                : "trace that route"}
+                : mode === "drift"
+                  ? "gather that sky"
+                  : "trace that route"}
           </strong>
           <span>{error}</span>
           <button aria-label="Dismiss" onClick={() => setError(null)}>
@@ -1733,7 +1934,23 @@ function App() {
         />
       )}
 
-      {(route || embed) && mode !== "playlist" && <Legend />}
+      {drift && (
+        <DriftResult
+          drift={drift}
+          title={blendTitle(driftSpec)}
+          onWander={() => void runDrift(driftSpec)}
+          onInspect={setInspect}
+          onClose={() => setDrift(null)}
+          token={auth.token}
+          canSave={!!auth.clientId}
+          onLogin={auth.login}
+          onError={setError}
+          playingId={playback.playingId}
+          onAudition={playback.toggleTrack}
+        />
+      )}
+
+      {(route || embed || drift) && mode !== "playlist" && <Legend />}
 
       {inspect && (
         <Inspector
@@ -2196,15 +2413,320 @@ function ByopPanel({
   );
 }
 
+// A music-forward dial: a labelled range with word anchors at each end. The
+// range carries no numbers — the listener feels their way along it. `--air` tints
+// the filled track so the two dials read as part of the chosen air's world.
+// A tuning dial: a range with word anchors and, optionally, a live value read-out.
+// Handles both the 0–1 feel dials and the integer "how many" dial.
+function DriftDial({
+  label,
+  lo,
+  hi,
+  value,
+  min = 0,
+  max = 1,
+  step = 0.01,
+  display,
+  onChange,
+}: {
+  label: string;
+  lo: string;
+  hi: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  display?: string;
+  onChange: (v: number) => void;
+}) {
+  const fill = ((value - min) / (max - min)) * 100;
+  return (
+    <label className="driftDial">
+      <span className="driftDialLabel">
+        {label}
+        {display != null && <b className="driftDialVal">{display}</b>}
+      </span>
+      <input
+        className="driftRange"
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ "--fill": `${fill}%` } as React.CSSProperties}
+        aria-label={`${label}: ${lo} to ${hi}`}
+      />
+      <span className="driftDialEnds" aria-hidden>
+        <span>{lo}</span>
+        <span>{hi}</span>
+      </span>
+    </label>
+  );
+}
+
+// Build the exact blend: selected genres as removable chips + a search that adds
+// any of the corpus's genres (with track counts). This is the tuning surface —
+// concrete and legible; the latent-space query it drives stays hidden.
+function GenrePicker({
+  selected,
+  catalog,
+  onChange,
+}: {
+  selected: string[];
+  catalog: GenreCount[] | null;
+  onChange: (genres: string[]) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const sel = useMemo(() => new Set(selected), [selected]);
+  const matches = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return (catalog ?? [])
+      .filter((g) => !sel.has(g.name) && (query ? g.name.includes(query) : true))
+      .slice(0, query ? 40 : 12);
+  }, [q, catalog, sel]);
+
+  return (
+    <div className="driftBlend">
+      <div className="driftChosen" aria-label="Chosen genres">
+        {selected.length === 0 && (
+          <span className="driftEmpty">
+            no genres yet — tap a preset, or add one below
+          </span>
+        )}
+        {selected.map((name) => (
+          <span
+            key={name}
+            className="blendChip"
+            style={{ "--g": genreColor(name) } as React.CSSProperties}
+          >
+            <span className="blendDot" aria-hidden />
+            {name}
+            <button
+              className="blendX"
+              onClick={() => onChange(selected.filter((n) => n !== name))}
+              aria-label={`Remove ${name}`}
+            >
+              <X size={11} aria-hidden />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="driftAdd">
+        <Search size={13} aria-hidden />
+        <input
+          type="text"
+          value={q}
+          placeholder={catalog ? "add a genre…" : "loading genres…"}
+          disabled={!catalog}
+          onChange={(e) => setQ(e.target.value)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 140)}
+          aria-label="Search genres to add"
+        />
+        {q && (
+          <button className="driftAddClear" onClick={() => setQ("")} aria-label="Clear">
+            <X size={13} aria-hidden />
+          </button>
+        )}
+      </div>
+      {open && catalog && (
+        <div className="driftSuggest" role="listbox">
+          {matches.map((g) => (
+            <button
+              key={g.name}
+              className="suggestChip"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange([...selected, g.name]);
+                setQ("");
+              }}
+              style={{ "--g": genreColor(g.name) } as React.CSSProperties}
+            >
+              <Plus size={11} aria-hidden />
+              <span className="suggestName">{g.name}</span>
+              <b>{g.count}</b>
+            </button>
+          ))}
+          {matches.length === 0 && <span className="suggestEmpty">no match</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The Drift tuning workbench: quick-start presets, the editable genre blend, and
+// three concrete dials. The construction stays hidden; the levers are all real.
+function DriftPanel({
+  spec,
+  catalog,
+  onChange,
+  onWander,
+  busy,
+  cast,
+  open,
+  collapsible,
+  onToggleOpen,
+}: {
+  spec: DriftSpec;
+  catalog: GenreCount[] | null;
+  onChange: (s: DriftSpec) => void;
+  onWander: () => void;
+  busy: boolean;
+  cast: boolean;
+  open: boolean;
+  collapsible: boolean;
+  onToggleOpen: () => void;
+}) {
+  // Live pool size for the current blend — the tuning feedback: how much of the
+  // corpus you're drawing from before you even wander.
+  const poolSize = useMemo(() => {
+    if (!catalog) return null;
+    const m = new Map(catalog.map((g) => [g.name, g.count]));
+    return spec.genres.reduce((n, name) => n + (m.get(name) ?? 0), 0);
+  }, [catalog, spec.genres]);
+
+  const applyPreset = (a: Air) =>
+    onChange({
+      ...spec,
+      preset: a.key,
+      genres: catalog ? airGenres(a, catalog) : spec.genres,
+    });
+  // Editing genres by hand drops the preset badge — it's a custom blend now.
+  const setGenres = (genres: string[]) =>
+    onChange({ ...spec, genres, preset: undefined });
+
+  // Collapsed: a slim bar that keeps the map visible. Re-open with "Tune".
+  if (!open) {
+    return (
+      <div className="drift collapsed">
+        <span className="driftCollapsedTitle">
+          <Wind size={15} aria-hidden />
+          <b>{blendTitle(spec)}</b>
+          <span className="driftCollapsedMeta">{spec.genres.length} genres</span>
+        </span>
+        <button className="driftTune" onClick={onToggleOpen}>
+          <SlidersHorizontal size={14} aria-hidden />
+          <span>Tune</span>
+        </button>
+        <button
+          className="trace"
+          onClick={onWander}
+          disabled={busy || spec.genres.length === 0}
+        >
+          {busy ? (
+            <Loader2 size={16} className="spin" aria-hidden />
+          ) : (
+            <Wind size={16} aria-hidden />
+          )}
+          <span>{busy ? "Gathering" : "Wander again"}</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="drift">
+      <div className="driftPresets" role="group" aria-label="Preset airs">
+        <span className="driftPresetsLabel">Start from</span>
+        {AIRS.map((a) => (
+          <button
+            key={a.key}
+            className={`airChip${spec.preset === a.key ? " on" : ""}`}
+            style={{ "--air": a.hue } as React.CSSProperties}
+            onClick={() => applyPreset(a)}
+            title={a.note}
+          >
+            <span className="airDot" aria-hidden />
+            <span className="airLabel">{a.label}</span>
+          </button>
+        ))}
+        {collapsible && (
+          <button className="driftHide" onClick={onToggleOpen} title="Hide the controls">
+            <X size={14} aria-hidden />
+            <span>Hide</span>
+          </button>
+        )}
+      </div>
+
+      <GenrePicker selected={spec.genres} catalog={catalog} onChange={setGenres} />
+
+      <div className="driftBody">
+        <span className="driftPool">
+          {poolSize == null
+            ? "…"
+            : spec.genres.length === 0
+              ? "pick a genre to begin"
+              : `≈ ${poolSize.toLocaleString()} tracks in this blend`}
+        </span>
+        <DriftDial
+          label="How many"
+          lo="fewer"
+          hi="more"
+          min={20}
+          max={220}
+          step={10}
+          value={spec.count}
+          display={String(spec.count)}
+          onChange={(v) => onChange({ ...spec, count: v })}
+        />
+        <DriftDial
+          label="Familiarity"
+          lo="mainstream"
+          hi="deep cuts"
+          value={spec.familiarity}
+          onChange={(v) => onChange({ ...spec, familiarity: v })}
+        />
+        <DriftDial
+          label="Focus"
+          lo="just these"
+          hi="let it wander"
+          value={spec.focus}
+          onChange={(v) => onChange({ ...spec, focus: v })}
+        />
+        <button
+          className="trace"
+          onClick={onWander}
+          disabled={busy || spec.genres.length === 0}
+        >
+          {busy ? (
+            <Loader2 size={16} className="spin" aria-hidden />
+          ) : (
+            <Wind size={16} aria-hidden />
+          )}
+          <span>{busy ? "Gathering" : cast ? "Wander again" : "Wander"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Intro({
   mode,
   ready,
   compact,
 }: {
-  mode: "route" | "explore" | "playlist" | "byop";
+  mode: "route" | "explore" | "playlist" | "byop" | "drift";
   ready: boolean;
   compact: boolean;
 }) {
+  if (mode === "drift") {
+    return (
+      <div className="intro">
+        <h1>Drift across the map of taste</h1>
+        <p>
+          No song to name — choose a feeling and let the map gather a
+          constellation of tracks that share its air.
+        </p>
+        <p className="cue">
+          {compact
+            ? "Tap the bar above to build a blend, then wander."
+            : "Start from a preset, tune the blend, then press Wander."}
+        </p>
+      </div>
+    );
+  }
   if (mode === "byop") {
     return (
       <div className="intro">
@@ -2320,6 +2842,199 @@ function EmbedPanel({
         </span>
         <span className="embedNeigh">{count} nearest neighbours in view</span>
       </button>
+    </div>
+  );
+}
+
+// The Drift result: a legible read-back of the constellation the map gathered.
+// The intent stays music-forward (an air + a plain-language note); the honest
+// part is the genres actually present. Wander again reseeds within the same
+// intent; save turns the whole constellation into a Spotify playlist.
+function DriftResult({
+  drift,
+  title,
+  onWander,
+  onInspect,
+  onClose,
+  token,
+  canSave,
+  onLogin,
+  onError,
+  playingId,
+  onAudition,
+}: {
+  drift: DriftResponse;
+  title: string;
+  onWander: () => void;
+  onInspect: (n: TrackNode | null) => void;
+  onClose: () => void;
+  token: string | null;
+  canSave: boolean;
+  onLogin: () => void;
+  onError: (msg: string | null) => void;
+  playingId: string | null;
+  onAudition: (n: TrackNode) => void;
+}) {
+  // The result's accent takes the dominant genre's colour, so the strip belongs
+  // to the same legend as the stars on the map.
+  const accent = drift.genres[0] ? genreColor(drift.genres[0].name) : "#7c6cff";
+  const style = { "--air": accent } as React.CSSProperties;
+  // A plain read-back of the two feel dials that shaped this result.
+  const fam =
+    drift.familiarity < 0.38 ? "mainstream" : drift.familiarity > 0.62 ? "deep cuts" : "mixed";
+  const foc = drift.focus < 0.38 ? "tight" : drift.focus > 0.62 ? "wandering" : "balanced";
+  const descriptor = `${fam} · ${foc}`;
+
+  // ---- save the constellation to Spotify (mirrors the playlist composer) ----
+  const [saving, setSaving] = useState(false);
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
+  useEffect(() => setPlaylistUrl(null), [drift]);
+
+  const save = async () => {
+    if (!token) {
+      sessionStorage.setItem(PENDING_SAVE_KEY, "1");
+      onLogin();
+      return;
+    }
+    setSaving(true);
+    onError(null);
+    try {
+      const uris = drift.tracks.map((t) => t.uri).filter(Boolean);
+      const top = drift.genres
+        .slice(0, 3)
+        .map((g) => g.name)
+        .join(", ");
+      const url = await createJourneyPlaylist(
+        token,
+        `Drift · ${title}`,
+        `A ${title} constellation gathered by Pathfinder — ${descriptor}. ${drift.tracks.length} tracks${top ? `, drawn from ${top}` : ""}.`,
+        uris,
+      );
+      setPlaylistUrl(url);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        sessionStorage.setItem(PENDING_SAVE_KEY, "1");
+        onLogin();
+        return;
+      }
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => {
+    if (token && sessionStorage.getItem(PENDING_SAVE_KEY)) {
+      sessionStorage.removeItem(PENDING_SAVE_KEY);
+      void save();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // A short, auditionable sampler pulled from the constellation — the map is the
+  // main event, but a few named tracks make the result tangible and hearable.
+  const sampler = drift.tracks.slice(0, 8);
+
+  return (
+    <div className="strip drift" style={style}>
+      <div className="stripHead">
+        <span className="count driftCount">
+          <Wind size={13} aria-hidden /> {title}
+        </span>
+        <span className="driftHeadNote">{descriptor}</span>
+        <span className="tag driftTag">{drift.count} songs</span>
+        <div className="stripActions">
+          <button className="action" onClick={onWander} title="A fresh sky, same feel">
+            <Shuffle size={14} aria-hidden />
+            <span>Wander again</span>
+          </button>
+          {canSave &&
+            (playlistUrl ? (
+              <a
+                className="action saved"
+                href={playlistUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink size={14} aria-hidden />
+                <span>Open in Spotify</span>
+              </a>
+            ) : (
+              <button
+                className="action build"
+                onClick={() => void save()}
+                disabled={saving || drift.tracks.length === 0}
+                aria-label={
+                  token
+                    ? `Save ${drift.tracks.length} tracks to Spotify`
+                    : "Sign in and save to Spotify"
+                }
+              >
+                {saving ? (
+                  <Loader2 size={14} className="spin" aria-hidden />
+                ) : (
+                  <ListMusic size={14} aria-hidden />
+                )}
+                <span>
+                  {saving
+                    ? "Saving…"
+                    : token
+                      ? `Save ${drift.tracks.length}`
+                      : "Save to Spotify"}
+                </span>
+              </button>
+            ))}
+          <button className="action" onClick={onClose} title="Back to the map">
+            <X size={14} aria-hidden />
+            <span>Close</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="driftGenres" aria-label="Genres in this constellation">
+        {drift.genres.map((g) => (
+          <span
+            key={g.name}
+            className="driftGenre"
+            style={{ "--g": genreColor(g.name) } as React.CSSProperties}
+          >
+            <span className="driftGenreDot" aria-hidden />
+            {g.name}
+            <b>{g.count}</b>
+          </span>
+        ))}
+      </div>
+
+      <div className="driftSampler">
+        {sampler.map((n) => {
+          const sounding = playingId === (n.uri || n.id);
+          return (
+            <span
+              key={n.id}
+              className={`driftChip${sounding ? " sounding" : ""}`}
+              style={{ "--g": genreColor(n.genre) } as React.CSSProperties}
+            >
+              <button
+                className="driftChipPlay"
+                onClick={() => onAudition(n)}
+                aria-label={`${sounding ? "Pause" : "Play a preview of"} ${n.name}`}
+              >
+                {sounding ? <Pause size={12} /> : <Play size={12} />}
+              </button>
+              <button
+                className="driftChipName"
+                onClick={() => onInspect(n)}
+                title="Track details"
+              >
+                <b>{n.name}</b>
+                <small>{n.artist}</small>
+              </button>
+            </span>
+          );
+        })}
+        <span className="driftMore">
+          <Orbit size={12} aria-hidden /> tap any star to hear more
+        </span>
+      </div>
     </div>
   );
 }
@@ -2947,6 +3662,7 @@ function ComposePanel({
 function Scene({
   route,
   embed,
+  drift,
   idle,
   focus,
   onFocus,
@@ -2964,13 +3680,14 @@ function Scene({
 }: {
   route: RouteResponse | null;
   embed: EmbedResponse | null;
+  drift: DriftResponse | null;
   idle: boolean;
   focus: number | null;
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
   warp: boolean;
   includedIds: Set<string>;
-  mode: "route" | "explore" | "playlist" | "byop";
+  mode: "route" | "explore" | "playlist" | "byop" | "drift";
   reachCloud: ReachStop[];
   reach: number;
   curation: Curation;
@@ -2985,7 +3702,7 @@ function Scene({
   // mounted so it recedes into the fog behind us instead of cutting away —
   // that's the visual continuity. It unmounts only once the camera has arrived.
   const [arrived, setArrived] = useState(false);
-  useEffect(() => setArrived(false), [route, embed]);
+  useEffect(() => setArrived(false), [route, embed, drift]);
 
   // The splash cloud is anchored at the origin (centred on the random sample's
   // centroid in the shared global layout). We remember that centroid so a traced
@@ -3022,7 +3739,7 @@ function Scene({
   }, [focus]);
   useEffect(() => {
     manual.current = false;
-  }, [route, embed]);
+  }, [route, embed, drift]);
 
   return (
     <Canvas
@@ -3060,7 +3777,7 @@ function Scene({
           fade
           speed={prefersReducedMotion ? 0 : 0.5}
         />
-        {((!route && !embed) || !arrived) && (
+        {((!route && !embed && !drift) || !arrived) && (
           <IdleField
             paused={splashPaused}
             onInspect={(n) => {
@@ -3111,6 +3828,20 @@ function Scene({
             onCenter={requestCenter}
             onArrive={() => setArrived(true)}
             splashCentroid={splashCentroid.current}
+            selKey={selKey}
+            playKey={playKey}
+          />
+        )}
+        {drift && (
+          <DriftField
+            drift={drift}
+            paused={splashPaused}
+            onInspect={(n) => {
+              if (n) setSplashPaused(true);
+              onInspect(n);
+            }}
+            onCenter={requestCenter}
+            onArrive={() => setArrived(true)}
             selKey={selKey}
             playKey={playKey}
           />
@@ -4090,6 +4821,78 @@ function EmbedField({
         goal={camGoal}
         center={center}
         trigger={embed}
+        onArrive={onArrive}
+      />
+    </group>
+  );
+}
+
+// The Drift constellation: the tracks a Wander gathered, laid out at the origin
+// in the splash's own envelope (fitToField) so it reads as a coherent cluster.
+// It turns slowly like the idle field, scales in on arrival, and re-frames the
+// camera on the origin from wherever the last view left it. Picking a star pauses
+// the spin so the label stays steady; a void click resumes it (via the shared
+// splash-paused state in Scene).
+function DriftField({
+  drift,
+  paused,
+  onInspect,
+  onCenter,
+  onArrive,
+  selKey,
+  playKey,
+}: {
+  drift: DriftResponse;
+  paused: boolean;
+  onInspect: (n: TrackNode | null) => void;
+  onCenter: (world: THREE.Vector3) => void;
+  onArrive: () => void;
+  selKey: string | null;
+  playKey: string | null;
+}) {
+  const group = useRef<THREE.Group>(null);
+  const tracks = useMemo(() => fitToField(drift.tracks), [drift]);
+  const intro = useRef(0);
+  useEffect(() => {
+    intro.current = 0;
+  }, [drift]);
+
+  useFrame((_, delta) => {
+    const g = group.current;
+    if (!g) return;
+    if (!prefersReducedMotion && !paused) g.rotation.y += delta * 0.04;
+    if (intro.current < 1) {
+      intro.current = prefersReducedMotion
+        ? 1
+        : Math.min(1, intro.current + delta / 0.7);
+      const e = 1 - Math.pow(1 - intro.current, 3);
+      g.scale.setScalar(0.66 + 0.34 * e);
+    }
+  });
+
+  const center = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const camGoal = useMemo(() => new THREE.Vector3(0, 4, 19), []);
+
+  return (
+    <group ref={group}>
+      {tracks.map((n, i) => (
+        <GlowDot
+          key={n.id}
+          position={n.position}
+          color={genreColor(n.genre)}
+          size={i % 11 === 0 ? 0.085 : 0.05}
+          glow={0.55}
+          label={{ name: n.name, artist: n.artist }}
+          onPick={() => onInspect(n)}
+          onCenter={onCenter}
+          selected={matchKey(n, selKey)}
+          playing={matchKey(n, playKey)}
+        />
+      ))}
+      <RouteFlyIn
+        goal={camGoal}
+        center={center}
+        trigger={drift}
         onArrive={onArrive}
       />
     </group>

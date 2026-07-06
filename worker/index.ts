@@ -556,6 +556,230 @@ async function buildEmbed(env: Env, payload: any, state: CoreState) {
   return { track: requestedNode(resolved, emb.pos, !resolved.exact), cloud: emb.cloud };
 }
 
+// ---- /api/drift ------------------------------------------------------------
+// Explore the corpus by musical *intent* rather than by naming a song. The
+// listener turns a few music-forward dials (an "air", breadth, temperament);
+// this endpoint quietly translates that into a corpus query — pick a seed inside
+// the air's genre family, biased along the rotation-fit axis by temperament, then
+// grow a coherent neighbourhood (sample_field, the same primitive the splash
+// uses) and filter it to the requested character. The construction stays hidden;
+// the intent is musical; the result is a legible constellation. See PRODUCT.md
+// ("make the abstract ML artifact legible") and README.
+//
+// Each air is a family of genre substrings matched against genre_primary. The
+// substrings are tuned to the corpus's actual mass (Argentine/Latin-and-
+// electronic-heavy): alternative dance, downtempo, big beat, alternative rock,
+// idm, ambient, reggaetón/cumbia/tango, etc.
+const AIRS: Record<string, { label: string; match: string[] }> = {
+  nocturne: {
+    label: "Nocturne",
+    match: [
+      "downtempo", "trip hop", "chillwave", "chillhop", "lo-fi house",
+      "jazz house", "deep house", "ambient", "organic house", "dub techno",
+      "minimal", "melodic house", "melodic techno", "nu jazz", "balearic",
+      "chill", "lounge", "abstract",
+    ],
+  },
+  aurora: {
+    label: "Aurora",
+    match: [
+      "dance pop", "art pop", "dream pop", "synthpop", "indie pop", "chamber pop",
+      "baroque pop", "city pop", "bedroom pop", "jangle", "power pop", "twee",
+      "ambient pop", "folk-pop", "sunshine", "shibuya-kei", "beatlesque", "electropop",
+    ],
+  },
+  kinetic: {
+    label: "Kinetic",
+    match: [
+      "alternative dance", "big beat", "idm", "techno", "tech house", "acid house",
+      "breakbeat", "jungle", "uk garage", "indie dance", "electro", "drum and bass",
+      "dance-punk", "dance rock", "edm", "hard house", "rave", "electroclash",
+      "hip house", "filter house", "disco house", "nu disco", "big room", "eurodance",
+    ],
+  },
+  hearth: {
+    label: "Hearth",
+    match: [
+      "alternative rock", "argentine rock", "album rock", "classic rock", "indie rock",
+      "art rock", "garage rock", "blues", "folk", "singer-songwriter", "americana",
+      "britpop", "post-punk", "new wave", "rock en", "mellow gold", "art punk",
+      "psych", "soul", "funk", "madchester", "permanent wave",
+    ],
+  },
+  undertow: {
+    label: "Undertow",
+    match: [
+      "metal", "industrial", "darkwave", "dark wave", "cold wave", "ebm",
+      "horror synth", "dark ambient", "drone", "gothic", "doom", "sludge",
+      "stoner", "hardcore", "post-hardcore", "death", "noise", "witch house",
+      "neue deutsche harte", "cyberpunk", "post-punk",
+    ],
+  },
+  meridian: {
+    label: "Meridian",
+    match: [
+      "reggaeton", "cumbia", "tango", "flamenco", "bachata", "salsa", "latin",
+      "trap argentino", "neoperreo", "rkt", "cuarteto", "candombe", "tropical",
+      "perreo", "dembow", "bolero", "chamamé", "murga", "bandoneon", "neotango",
+      "folklore argentino", "techengue", "candombe",
+    ],
+  },
+};
+
+// Lazily built once per isolate: genre (lowercased) + fit for every corpus row,
+// so a drift query can pool by air and rank by temperament without re-scanning.
+interface DriftIndex {
+  genre: string[]; // lowercased genre_primary per row
+  fit: Float32Array;
+  counts: Map<string, number>; // genre → number of tracks (the tuning catalog)
+}
+let driftIndex: DriftIndex | null = null;
+function ensureDriftIndex(n: number): DriftIndex {
+  if (driftIndex) return driftIndex;
+  const genre = new Array<string>(n);
+  const fit = new Float32Array(n);
+  const counts = new Map<string, number>();
+  for (let r = 0; r < n; r += 1) {
+    let g = "";
+    try {
+      g = (JSON.parse(meta_at(r)).genre ?? "").toString().toLowerCase();
+    } catch {
+      /* leave blank — never matches, still routable */
+    }
+    genre[r] = g;
+    fit[r] = fit_at(r);
+    if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
+  }
+  driftIndex = { genre, fit, counts };
+  return driftIndex;
+}
+
+// The tuning catalog: every genre + its track count, most-populated first. Feeds
+// the Drift genre picker so a listener can build the exact blend they want.
+function driftCatalog(state: CoreState) {
+  const idx = ensureDriftIndex(state.tracks);
+  return [...idx.counts.entries()]
+    .filter(([name]) => name && name !== "unknown")
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, count }));
+}
+
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const DRIFT_ARTIST_CAP = 4; // keep one artist from swallowing the constellation
+
+async function buildDrift(_env: Env, payload: any, state: CoreState) {
+  const idx = ensureDriftIndex(state.tracks);
+
+  // The tuning surface. The primary input is now an explicit set of genres (the
+  // listener builds the exact blend); `air` is kept only as a back-compat preset
+  // for older clients / API users. `familiarity`, `focus`, and `count` are the
+  // concrete dials — see the frontend for their plain-language framing.
+  const chosen = new Set<string>(
+    (Array.isArray(payload.genres) ? payload.genres : [])
+      .map((s: unknown) => String(s).toLowerCase().trim())
+      .filter(Boolean),
+  );
+  const useGenres = chosen.size > 0;
+  const airKey = typeof payload.air === "string" ? payload.air : "nocturne";
+  const air = AIRS[airKey] ?? AIRS.nocturne;
+  const inBlend = (g: string) => {
+    const s = (g ?? "").toLowerCase();
+    return useGenres ? chosen.has(s) : air.match.some((m) => s.includes(m));
+  };
+
+  // familiarity: 0 = mainstream / well-worn (high rotation-fit) … 1 = deep cuts
+  // (low fit). Back-compat: `temper` is the old name.
+  const familiarity = clamp01(Number(payload.familiarity ?? payload.temper ?? 0.35));
+  // focus: 0 = strictly the chosen genres (tight) … 1 = let it wander (more
+  // off-genre bleed + a wider scatter of anchors). Back-compat: `breadth` widens.
+  const focus = clamp01(Number(payload.focus ?? payload.wander ?? 0.3));
+  // count: how many stars to gather. Back-compat: derive from `breadth`.
+  const count = Number.isFinite(payload.count)
+    ? Math.max(20, Math.min(250, Math.round(Number(payload.count))))
+    : Math.round(70 + clamp01(Number(payload.breadth ?? 0.5)) * 130);
+
+  // Pool = every row in the chosen blend. Fall back to the whole corpus if it
+  // lands thin, so a drift never dead-ends.
+  let pool: number[] = [];
+  for (let r = 0; r < state.tracks; r += 1) {
+    if (inBlend(idx.genre[r])) pool.push(r);
+  }
+  const pooled = pool.length;
+  if (pool.length < 30) pool = Array.from({ length: state.tracks }, (_, r) => r);
+
+  // Scatter anchors across a fit-band window centred on the familiarity dial —
+  // several tight knots rather than one, so the sky is diverse and stays loyal to
+  // the blend (a single-seed walk drifts off it). Focus widens the anchor count.
+  const byFit = pool.slice().sort((a, b) => idx.fit[b] - idx.fit[a]); // high → low
+  const half = 0.24;
+  const lo = Math.max(0, Math.floor((familiarity - half) * byFit.length));
+  const hi = Math.max(lo + 1, Math.min(byFit.length, Math.ceil((familiarity + half) * byFit.length)));
+  const band = byFit.slice(lo, hi);
+  // Scatter a handful of seeds across the fit-band and grow a neighbourhood field
+  // from each (sample_field: a connected BFS slice of the manifold, up to a few
+  // hundred positioned nodes per call — far higher in-blend yield than the 20-wide
+  // KNN fan-out). We then keep the in-blend tracks and let focus decide the bleed.
+  const nSeeds = Math.min(band.length, 30, Math.max(8, Math.ceil(count / 8)));
+  const perSeed = Math.min(220, Math.max(90, count));
+  const seedSet = new Set<number>();
+  let guard = 0;
+  while (seedSet.size < nSeeds && guard < nSeeds * 12) {
+    seedSet.add(band[Math.floor(Math.random() * band.length)]);
+    guard += 1;
+  }
+
+  // Merge the fields; keep the in-blend tracks first; cap per artist so no one act
+  // swallows the sky. Baked global-layout coords, so every field shares one space.
+  const seen = new Set<string>();
+  const perArtist = new Map<string, number>();
+  const inGenre: any[] = [];
+  const near: any[] = [];
+  for (const s of seedSet) {
+    const field = JSON.parse(sample_field(s, perSeed)) as any[];
+    for (const nd of field) {
+      if (seen.has(nd.id)) continue;
+      seen.add(nd.id);
+      const artist = (nd.artist ?? "").toLowerCase();
+      const used = perArtist.get(artist) ?? 0;
+      if (used >= DRIFT_ARTIST_CAP) continue;
+      perArtist.set(artist, used + 1);
+      (inBlend(nd.genre) ? inGenre : near).push({ ...nd, kind: "drift" });
+    }
+  }
+
+  // In-blend tracks are the constellation; focus controls how much off-genre
+  // bleed (the edge of the blend — still nearest-neighbours) rounds it out. Low
+  // focus stays pure; high focus lets in more. A niche blend simply returns fewer
+  // stars rather than a padded, incoherent sky (PRODUCT: honest about what's there).
+  const nearBudget = Math.max(
+    0,
+    Math.min(near.length, Math.round(count * focus * 0.6), count - inGenre.length),
+  );
+  const kept = inGenre.slice(0, count).concat(near.slice(0, nearBudget));
+
+  // Dominant genres actually present — the honest read-back for the legend.
+  const gc = new Map<string, number>();
+  for (const n of kept) gc.set(n.genre, (gc.get(n.genre) ?? 0) + 1);
+  const genres = [...gc.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, n]) => ({ name, count: n }));
+
+  return {
+    air: useGenres ? null : airKey,
+    label: useGenres ? "" : air.label,
+    genresIn: [...chosen], // echo the requested blend
+    familiarity,
+    focus,
+    requested: count,
+    seed: [...seedSet][0] ?? 0,
+    pooled, // how large the chosen blend was (before any fallback)
+    count: kept.length,
+    genres,
+    tracks: kept,
+  };
+}
+
 // ---- /api/arrange + /api/playlist (Bring Your Own Playlist) ----------------
 // Upper bounds that keep an arrange request inside the Worker CPU + subrequest
 // budget. Every not-in-corpus track costs a cold-start (Spotify track+artists +
@@ -1048,6 +1272,78 @@ function openApiSpec(origin: string) {
           },
         },
       },
+      "/api/genres": {
+        get: {
+          summary: "Drift tuning catalog — every genre and its track count",
+          responses: {
+            "200": {
+              description: "Genres, most-populated first.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { type: "object", properties: { name: { type: "string" }, count: { type: "integer" } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/drift": {
+        post: {
+          summary: "Explore the corpus by musical intent (a constellation)",
+          description:
+            "Gather a coherent cluster of corpus tracks from an explicit blend of " +
+            "genres (see GET /api/genres), tuned by familiarity (0 mainstream … 1 " +
+            "deep cuts), focus (0 strictly the chosen genres … 1 let it wander), " +
+            "and count. Legacy: an `air` preset (nocturne, aurora, kinetic, hearth, " +
+            "undertow, meridian) with breadth/temper still works when no genres given.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    genres: { type: "array", items: { type: "string" }, example: ["deep house", "downtempo"] },
+                    familiarity: { type: "number", minimum: 0, maximum: 1, default: 0.35 },
+                    focus: { type: "number", minimum: 0, maximum: 1, default: 0.3 },
+                    count: { type: "integer", minimum: 20, maximum: 250, default: 100 },
+                    air: { type: "string", example: "nocturne", description: "Legacy preset used only when genres is empty." },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "The chosen air and the constellation it gathered.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      air: { type: "string" },
+                      label: { type: "string" },
+                      breadth: { type: "number" },
+                      temper: { type: "number" },
+                      seed: { type: "integer" },
+                      pooled: { type: "integer" },
+                      count: { type: "integer" },
+                      genres: {
+                        type: "array",
+                        items: { type: "object", properties: { name: { type: "string" }, count: { type: "integer" } } },
+                      },
+                      tracks: { type: "array", items: { $ref: "#/components/schemas/TrackNode" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/preview": {
         get: {
           summary: "Find a 30s preview clip for a track",
@@ -1222,6 +1518,16 @@ export default {
         if (url.pathname === "/api/embed" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
           return json(await buildEmbed(env, payload, state));
+        }
+        // Drift: explore by musical intent — an explicit blend of genres tuned by
+        // familiarity / focus / count → a coherent constellation of corpus tracks.
+        if (url.pathname === "/api/drift" && request.method === "POST") {
+          const payload = await request.json().catch(() => ({}));
+          return json(await buildDrift(env, payload, state));
+        }
+        // The Drift tuning catalog: every genre + track count (cached per isolate).
+        if (url.pathname === "/api/genres" && request.method === "GET") {
+          return json(driftCatalog(state));
         }
         // BYOP: re-order a user's own playlist into a journey (same response
         // shape as /api/route, plus a `source` block).

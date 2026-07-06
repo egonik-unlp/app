@@ -32,3 +32,41 @@ binding = "AI"
 # Optional override of the embedding model:
 # [vars]
 # EMBED_MODEL = "@cf/baai/bge-m3"
+
+# ---------------------------------------------------------------------------
+# Staging environment — an isolated worker, separate from the default one, so a
+# staging deploy never touches the primary. Bindings are NOT inherited by named
+# environments, so they're repeated here.
+#   Deploy:  wrangler deploy --env staging
+#   Secrets: wrangler secret put SPOTIFY_CLIENT_ID     --env staging
+#            wrangler secret put SPOTIFY_CLIENT_SECRET  --env staging
+# Without the secrets the app still works (corpus search fallback, no Spotify
+# search/save); with them, register the staging origin as a Spotify Redirect URI.
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "staging-pathfinder"
+
+[env.staging.observability]
+enabled = true
+
+[env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[env.staging.ai]
+binding = "AI"
+
+# Experiments environment — the pre-existing `experimental-pathfinder` worker.
+#   Deploy:  wrangler deploy --env experiments
+[env.experiments]
+name = "experimental-pathfinder"
+
+[env.experiments.observability]
+enabled = true
+
+[env.experiments.assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[env.experiments.ai]
+binding = "AI"
