@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Billboard, Line, OrbitControls, Stars, Text } from "@react-three/drei";
 import {
   ArrowRight,
+  CalendarRange,
   Check,
   Compass,
   ExternalLink,
@@ -60,6 +61,8 @@ type TrackNode = {
   artist: string;
   album: string | null;
   genre: string;
+  // Release year of the track's album, when known; absent/null otherwise.
+  release_year?: number | null;
   spotify_url: string | null;
   fit: number | null;
   position: [number, number, number];
@@ -107,6 +110,31 @@ type DriftResponse = {
   genres: GenreCount[];
   tracks: TrackNode[];
 };
+
+// A release-year window. null = no filter (every year passes). Tracks with no
+// known year always pass — a missing tag shouldn't drop a track from the sky.
+type YearRange = [number, number] | null;
+
+function withinYear(node: TrackNode, range: YearRange): boolean {
+  if (!range) return true;
+  const y = node.release_year;
+  if (typeof y !== "number") return true;
+  return y >= range[0] && y <= range[1];
+}
+
+// The year span across a set of tracks, or null when they don't cover at least
+// two distinct years (nothing to slice → the filter stays inert / hidden).
+function yearSpan(tracks: TrackNode[]): [number, number] | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const t of tracks) {
+    const y = t.release_year;
+    if (typeof y !== "number") continue;
+    if (y < lo) lo = y;
+    if (y > hi) hi = y;
+  }
+  return hi > lo ? [lo, hi] : null;
+}
 
 // BYOP: what the arrange endpoint reports about the imported playlist — the
 // source name (for the saved playlist) and an honest account of anything that
@@ -1228,6 +1256,22 @@ function App() {
   });
   const [drift, setDrift] = useState<DriftResponse | null>(null);
   const [drifting, setDrifting] = useState(false);
+  // Optional release-year window over the gathered constellation. Reset whenever
+  // a new sky is cast (or drift closes) so a stale window never carries over.
+  const [driftYear, setDriftYear] = useState<YearRange>(null);
+  useEffect(() => setDriftYear(null), [drift]);
+  // The window's domain is the year span of the cast constellation; it stays
+  // inert (and the control hides) unless the sky spans 2+ years. Filtering
+  // narrows the tracks the strip, sampler, save, and 3-D field all draw from.
+  const driftDomain = useMemo(() => (drift ? yearSpan(drift.tracks) : null), [drift]);
+  const activeDriftYear = driftDomain ? driftYear : null;
+  const driftView = useMemo<DriftResponse | null>(() => {
+    if (!drift) return null;
+    if (!activeDriftYear) return drift;
+    const tracks = drift.tracks.filter((t) => withinYear(t, activeDriftYear));
+    return { ...drift, tracks, count: tracks.length };
+  }, [drift, activeDriftYear]);
+  const driftHidden = drift ? drift.tracks.length - (driftView?.tracks.length ?? 0) : 0;
   // The tuning workbench is tall; once a constellation is cast we collapse it to a
   // slim bar so the map is the hero, and reopen on demand ("Tune"). Always open on
   // mobile (the controls live in their own bottom-sheet over the map) and before
@@ -1618,7 +1662,7 @@ function App() {
       <Scene
         route={route}
         embed={embed}
-        drift={drift}
+        drift={driftView}
         idle={!route && !embed && !drift}
         focus={focus}
         onFocus={setFocus}
@@ -1934,9 +1978,9 @@ function App() {
         />
       )}
 
-      {drift && (
+      {driftView && (
         <DriftResult
-          drift={drift}
+          drift={driftView}
           title={blendTitle(driftSpec)}
           onWander={() => void runDrift(driftSpec)}
           onInspect={setInspect}
@@ -1947,6 +1991,10 @@ function App() {
           onError={setError}
           playingId={playback.playingId}
           onAudition={playback.toggleTrack}
+          yearDomain={driftDomain}
+          yearRange={driftYear}
+          onYearRange={setDriftYear}
+          yearHidden={driftHidden}
         />
       )}
 
@@ -2850,6 +2898,79 @@ function EmbedPanel({
 // The intent stays music-forward (an air + a plain-language note); the honest
 // part is the genres actually present. Wander again reseeds within the same
 // intent; save turns the whole constellation into a Spotify playlist.
+// Year filter: constrain a set of tracks to a release-year window. A dual-thumb
+// range over the span of years present; only the thumbs take pointer events so
+// both handles stay grabbable. Hidden by the caller when there's nothing to
+// slice (fewer than two distinct years).
+function YearFilter({
+  domain,
+  range,
+  onChange,
+  hidden,
+}: {
+  domain: [number, number];
+  range: [number, number];
+  onChange: (r: YearRange) => void;
+  hidden: number;
+}) {
+  const [dMin, dMax] = domain;
+  const [from, to] = range;
+  const span = Math.max(1, dMax - dMin);
+  const lo = ((from - dMin) / span) * 100;
+  const hi = ((to - dMin) / span) * 100;
+  const active = from > dMin || to < dMax;
+  return (
+    <div className="years">
+      <span className="yearsLabel">
+        <CalendarRange size={13} aria-hidden /> Years
+      </span>
+      <div
+        className="yearsSlider"
+        style={{ "--lo": `${lo}%`, "--hi": `${hi}%` } as React.CSSProperties}
+      >
+        <span className="yearsTrack" aria-hidden />
+        <span className="yearsFill" aria-hidden />
+        <input
+          className="yearsThumb"
+          type="range"
+          min={dMin}
+          max={dMax}
+          step={1}
+          value={from}
+          onChange={(e) => onChange([Math.min(Number(e.target.value), to), to])}
+          aria-label="Earliest release year"
+          aria-valuetext={`from ${from}`}
+        />
+        <input
+          className="yearsThumb"
+          type="range"
+          min={dMin}
+          max={dMax}
+          step={1}
+          value={to}
+          onChange={(e) => onChange([from, Math.max(Number(e.target.value), from)])}
+          aria-label="Latest release year"
+          aria-valuetext={`to ${to}`}
+        />
+      </div>
+      <span className="yearsReadout" aria-live="polite">
+        <b>{from}</b>–<b>{to}</b>
+        {hidden > 0 && <span className="yearsHidden"> · {hidden} hidden</span>}
+      </span>
+      {active && (
+        <button
+          className="yearsClear"
+          onClick={() => onChange(null)}
+          aria-label="Clear year filter"
+          title="Clear year filter"
+        >
+          <RotateCcw size={12} aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function DriftResult({
   drift,
   title,
@@ -2862,6 +2983,10 @@ function DriftResult({
   onError,
   playingId,
   onAudition,
+  yearDomain,
+  yearRange,
+  onYearRange,
+  yearHidden,
 }: {
   drift: DriftResponse;
   title: string;
@@ -2874,6 +2999,10 @@ function DriftResult({
   onError: (msg: string | null) => void;
   playingId: string | null;
   onAudition: (n: TrackNode) => void;
+  yearDomain: [number, number] | null;
+  yearRange: YearRange;
+  onYearRange: (r: YearRange) => void;
+  yearHidden: number;
 }) {
   // The result's accent takes the dominant genre's colour, so the strip belongs
   // to the same legend as the stars on the map.
@@ -2884,6 +3013,14 @@ function DriftResult({
     drift.familiarity < 0.38 ? "mainstream" : drift.familiarity > 0.62 ? "deep cuts" : "mixed";
   const foc = drift.focus < 0.38 ? "tight" : drift.focus > 0.62 ? "wandering" : "balanced";
   const descriptor = `${fam} · ${foc}`;
+
+  // The clamped window the year handles sit at (App owns the raw range + domain).
+  const yearWindow: [number, number] | null = yearDomain
+    ? [
+        Math.max(yearDomain[0], yearRange?.[0] ?? yearDomain[0]),
+        Math.min(yearDomain[1], yearRange?.[1] ?? yearDomain[1]),
+      ]
+    : null;
 
   // ---- save the constellation to Spotify (mirrors the playlist composer) ----
   const [saving, setSaving] = useState(false);
@@ -3004,6 +3141,17 @@ function DriftResult({
         ))}
       </div>
 
+      {yearDomain && yearWindow && (
+        <div className="driftYears">
+          <YearFilter
+            domain={yearDomain}
+            range={yearWindow}
+            onChange={onYearRange}
+            hidden={yearHidden}
+          />
+        </div>
+      )}
+
       <div className="driftSampler">
         {sampler.map((n) => {
           const sounding = playingId === (n.uri || n.id);
@@ -3026,7 +3174,10 @@ function DriftResult({
                 title="Track details"
               >
                 <b>{n.name}</b>
-                <small>{n.artist}</small>
+                <small>
+                  {n.artist}
+                  {typeof n.release_year === "number" ? ` · ${n.release_year}` : ""}
+                </small>
               </button>
             </span>
           );

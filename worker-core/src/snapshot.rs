@@ -10,6 +10,10 @@ pub struct Meta {
     pub artist: String,
     pub album: Option<String>,
     pub genre: String,
+    // Release year of the track's album, when known. Optional so snapshots built
+    // before this field existed still deserialize (defaults to None).
+    #[serde(default)]
+    pub release_year: Option<i32>,
 }
 
 pub struct Corpus {
