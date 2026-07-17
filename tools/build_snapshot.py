@@ -68,7 +68,9 @@ def write_corpus(g: A.TrackGraph, scores: dict[int, float], path: Path) -> None:
             "artist": m.get("artist") or "Unknown artist",
             "album": m.get("album"),
             "genre": m.get("genre_primary") or "unknown",
-            "release_year": m.get("release_year"),
+            # 0 is the metadata's "unknown" sentinel — normalise to null so the
+            # client's year filter excludes it from the span (and always passes it).
+            "release_year": (m.get("release_year") or None),
         }
         for m in (g.meta[pid] for pid in g.ids)
     ]
