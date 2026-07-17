@@ -30,6 +30,7 @@ fn off_meta(tag: &str) -> Meta {
         artist: format!("off-artist-{tag}"),
         album: None,
         genre: format!("off-genre-{tag}"),
+        release_year: None,
     }
 }
 
@@ -68,6 +69,7 @@ fn toy_corpus(n: usize, k: usize) -> Corpus {
             artist: format!("artist{i}"),
             album: None,
             genre: format!("genre{i}"),
+            release_year: None,
         })
         .collect();
     let mut uri_to_row = std::collections::HashMap::new();

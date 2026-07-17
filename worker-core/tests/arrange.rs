@@ -26,6 +26,7 @@ fn meta(tag: usize) -> Meta {
         artist: format!("a{tag}"),
         album: None,
         genre: format!("g{tag}"),
+        release_year: None,
     }
 }
 

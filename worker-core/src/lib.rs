@@ -187,6 +187,7 @@ pub fn meta_at(row: usize) -> Result<String, JsValue> {
         Ok(json!({
             "uri": m.uri, "name": m.name, "artist": m.artist,
             "album": m.album, "genre": m.genre,
+            "release_year": m.release_year,
         })
         .to_string())
     })
@@ -227,6 +228,7 @@ pub fn search(query: &str, limit: usize) -> Result<String, JsValue> {
                     "spotify_id": spotify_id(&m.uri),
                     "uri": m.uri, "name": m.name, "artist": m.artist,
                     "album": m.album, "genre": m.genre,
+                    "release_year": m.release_year,
                     "in_corpus": true, "art": Value::Null,
                 })
             })
@@ -300,6 +302,7 @@ pub fn sample_field(seed_row: usize, count: usize) -> Result<String, JsValue> {
                     "artist": m.artist,
                     "album": m.album,
                     "genre": m.genre,
+                    "release_year": m.release_year,
                     "spotify_url": spotify_url(&m.uri),
                     "fit": c.fit[row] as f64,
                     "position": [p[0], p[1], p[2]],
@@ -448,6 +451,7 @@ pub fn route(
                 "artist": m.artist,
                 "album": m.album,
                 "genre": m.genre,
+                "release_year": m.release_year,
                 "spotify_url": spotify_url(&m.uri),
                 "fit": c.fit[row] as f64,
                 "position": [p[0], p[1], p[2]],
@@ -990,6 +994,7 @@ pub fn embed_track(anchor_row: usize, k_neighbors: usize) -> Result<String, JsVa
                     "artist": m.artist,
                     "album": m.album,
                     "genre": m.genre,
+                    "release_year": m.release_year,
                     "spotify_url": spotify_url(&m.uri),
                     "fit": c.fit[row] as f64,
                     "position": [p[0], p[1], p[2]],
@@ -1042,6 +1047,7 @@ pub fn embed_track_open(vec: &[f32], k_neighbors: usize) -> Result<String, JsVal
                     "artist": m.artist,
                     "album": m.album,
                     "genre": m.genre,
+                    "release_year": m.release_year,
                     "spotify_url": spotify_url(&m.uri),
                     "fit": c.fit[row] as f64,
                     "position": [p[0], p[1], p[2]],
@@ -1071,6 +1077,7 @@ fn node_json(id: &str, m: &Meta, fit: f64, pos: [f32; 3], w: f32, kind: &str) ->
         "artist": m.artist,
         "album": m.album,
         "genre": m.genre,
+        "release_year": m.release_year,
         "spotify_url": spotify_url(&m.uri),
         "fit": fit,
         "position": [pos[0], pos[1], pos[2]],

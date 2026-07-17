@@ -2385,6 +2385,157 @@ input {
   flex: none;
 }
 
+/* year filter — a dual-thumb range narrowing the constellation to an era */
+.driftYears {
+  margin-bottom: 10px;
+}
+.years {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.yearsLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.yearsLabel svg {
+  color: var(--air);
+}
+.yearsSlider {
+  position: relative;
+  flex: 1;
+  min-width: 140px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+}
+.yearsTrack,
+.yearsFill {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.yearsTrack {
+  left: 0;
+  right: 0;
+  background: var(--line-2);
+}
+.yearsFill {
+  left: var(--lo, 0%);
+  right: calc(100% - var(--hi, 100%));
+  background: var(--air);
+}
+/* two range inputs stacked over one track; only the thumbs take pointer events
+   so both handles stay grabbable no matter which sits on top */
+.yearsThumb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.yearsThumb::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+.yearsThumb::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+.yearsThumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: #f3f0ff;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--air) 60%, transparent),
+    0 0 12px color-mix(in oklab, var(--air) 70%, transparent);
+}
+.yearsThumb::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #f3f0ff;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--air) 60%, transparent),
+    0 0 12px color-mix(in oklab, var(--air) 70%, transparent);
+}
+.yearsThumb:focus-visible {
+  outline: none;
+}
+.yearsThumb:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--air),
+    0 0 14px color-mix(in oklab, var(--air) 70%, transparent);
+}
+.yearsThumb:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--air);
+}
+.yearsReadout {
+  flex: none;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.yearsReadout b {
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.yearsHidden {
+  color: var(--ink-2);
+}
+.yearsClear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.yearsClear:hover {
+  border-color: color-mix(in oklab, var(--air) 55%, transparent);
+  color: var(--ink-3);
+}
+@media (max-width: 760px) {
+  .years {
+    gap: 10px 12px;
+  }
+  .yearsSlider {
+    height: 34px;
+  }
+  .yearsThumb {
+    height: 34px;
+  }
+  .yearsReadout {
+    width: 100%;
+    order: 3;
+  }
+}
+
 /* auditionable sampler — a few named stars from the cloud */
 .driftSampler {
   display: flex;

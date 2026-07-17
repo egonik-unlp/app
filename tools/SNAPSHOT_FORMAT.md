@@ -26,7 +26,7 @@ off  type          field
 ```
 
 `meta_json[i]` fields (minimal set the runtime needs):
-`{ "uri", "name", "artist", "album", "genre" }`  (`genre` = `genre_primary`).
+`{ "uri", "name", "artist", "album", "genre", "release_year" }`  (`genre` = `genre_primary`; `release_year` is a nullable integer).
 
 KNN neighbors are symmetric and sorted by ascending cosine distance, matching
 `server/app.py:build_knn`.
