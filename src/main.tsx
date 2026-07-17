@@ -6,6 +6,7 @@ import {
   ArrowRight,
   CalendarRange,
   Check,
+  ChevronsRight,
   Compass,
   ExternalLink,
   GripVertical,
@@ -3022,6 +3023,11 @@ function DriftResult({
       ]
     : null;
 
+  // The list lives in a side drawer you can collapse to hand the whole screen to
+  // the map, then pull back with the edge tab. A fresh constellation reopens it.
+  const [open, setOpen] = useState(true);
+  useEffect(() => setOpen(true), [drift]);
+
   // ---- save the constellation to Spotify (mirrors the playlist composer) ----
   const [saving, setSaving] = useState(false);
   const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
@@ -3067,19 +3073,53 @@ function DriftResult({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // A short, auditionable sampler pulled from the constellation — the map is the
-  // main event, but a few named tracks make the result tangible and hearable.
-  const sampler = drift.tracks.slice(0, 8);
+  // The auditionable list of the whole constellation — the map is still the hero,
+  // but every gathered track is named and hearable here (the strip scrolls once
+  // the list outgrows a few rows, so it never swallows the map).
+  const sampler = drift.tracks;
 
   return (
-    <div className="strip drift" style={style}>
-      <div className="stripHead">
-        <span className="count driftCount">
-          <Wind size={13} aria-hidden /> {title}
+    <>
+      {/* pull tab — the way back to the list once it's tucked away */}
+      <button
+        className={`driftPullTab${open ? " hidden" : ""}`}
+        style={style}
+        onClick={() => setOpen(true)}
+        aria-label={`Show the ${drift.count} songs`}
+      >
+        <ListMusic size={15} aria-hidden />
+        <span>
+          <b>{drift.count}</b> songs
         </span>
-        <span className="driftHeadNote">{descriptor}</span>
-        <span className="tag driftTag">{drift.count} songs</span>
-        <div className="stripActions">
+      </button>
+
+      <aside
+        className={`driftDrawer${open ? "" : " collapsed"}`}
+        style={style}
+        aria-label="Drift constellation"
+        aria-hidden={!open}
+      >
+        <div className="driftDrawerHead">
+          <div className="driftTitle">
+            <span className="name">
+              <Wind size={14} aria-hidden /> {title}
+            </span>
+            <span className="meta">
+              <em>{descriptor}</em>
+              <span className="tag driftTag">{drift.count} songs</span>
+            </span>
+          </div>
+          <button
+            className="collapseBtn"
+            onClick={() => setOpen(false)}
+            title="Hide the list — focus the map"
+            aria-label="Hide the list"
+          >
+            <ChevronsRight size={16} aria-hidden />
+          </button>
+        </div>
+
+        <div className="driftActions">
           <button className="action" onClick={onWander} title="A fresh sky, same feel">
             <Shuffle size={14} aria-hidden />
             <span>Wander again</span>
@@ -3120,73 +3160,75 @@ function DriftResult({
                 </span>
               </button>
             ))}
-          <button className="action" onClick={onClose} title="Back to the map">
+          <button
+            className="action ghost"
+            onClick={onClose}
+            title="Clear the constellation"
+            aria-label="Clear the constellation"
+          >
             <X size={14} aria-hidden />
-            <span>Close</span>
           </button>
         </div>
-      </div>
 
-      <div className="driftGenres" aria-label="Genres in this constellation">
-        {drift.genres.map((g) => (
-          <span
-            key={g.name}
-            className="driftGenre"
-            style={{ "--g": genreColor(g.name) } as React.CSSProperties}
-          >
-            <span className="driftGenreDot" aria-hidden />
-            {g.name}
-            <b>{g.count}</b>
-          </span>
-        ))}
-      </div>
-
-      {yearDomain && yearWindow && (
-        <div className="driftYears">
-          <YearFilter
-            domain={yearDomain}
-            range={yearWindow}
-            onChange={onYearRange}
-            hidden={yearHidden}
-          />
-        </div>
-      )}
-
-      <div className="driftSampler">
-        {sampler.map((n) => {
-          const sounding = playingId === (n.uri || n.id);
-          return (
+        <div className="driftGenres" aria-label="Genres in this constellation">
+          {drift.genres.map((g) => (
             <span
-              key={n.id}
-              className={`driftChip${sounding ? " sounding" : ""}`}
-              style={{ "--g": genreColor(n.genre) } as React.CSSProperties}
+              key={g.name}
+              className="driftGenre"
+              style={{ "--g": genreColor(g.name) } as React.CSSProperties}
             >
-              <button
-                className="driftChipPlay"
-                onClick={() => onAudition(n)}
-                aria-label={`${sounding ? "Pause" : "Play a preview of"} ${n.name}`}
-              >
-                {sounding ? <Pause size={12} /> : <Play size={12} />}
-              </button>
-              <button
-                className="driftChipName"
-                onClick={() => onInspect(n)}
-                title="Track details"
-              >
-                <b>{n.name}</b>
-                <small>
-                  {n.artist}
-                  {typeof n.release_year === "number" ? ` · ${n.release_year}` : ""}
-                </small>
-              </button>
+              <span className="driftGenreDot" aria-hidden />
+              {g.name}
+              <b>{g.count}</b>
             </span>
-          );
-        })}
-        <span className="driftMore">
-          <Orbit size={12} aria-hidden /> tap any star to hear more
-        </span>
-      </div>
-    </div>
+          ))}
+        </div>
+
+        {yearDomain && yearWindow && (
+          <div className="driftYears">
+            <YearFilter
+              domain={yearDomain}
+              range={yearWindow}
+              onChange={onYearRange}
+              hidden={yearHidden}
+            />
+          </div>
+        )}
+
+        <div className="driftList">
+          {sampler.map((n) => {
+            const sounding = playingId === (n.uri || n.id);
+            return (
+              <div
+                key={n.id}
+                className={`driftRow${sounding ? " sounding" : ""}`}
+                style={{ "--g": genreColor(n.genre) } as React.CSSProperties}
+              >
+                <button
+                  className="rowPlay"
+                  onClick={() => onAudition(n)}
+                  aria-label={`${sounding ? "Pause" : "Play a preview of"} ${n.name}`}
+                >
+                  {sounding ? <Pause size={13} /> : <Play size={13} />}
+                </button>
+                <button
+                  className="rowText"
+                  onClick={() => onInspect(n)}
+                  title="Track details"
+                >
+                  <b>{n.name}</b>
+                  <small>
+                    {n.artist}
+                    {typeof n.release_year === "number" ? ` · ${n.release_year}` : ""}
+                  </small>
+                </button>
+                <span className="rowDot" aria-hidden />
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+    </>
   );
 }
 
