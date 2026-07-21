@@ -97,6 +97,7 @@ type DriftSpec = {
   familiarity: number; // 0 mainstream · 1 deep cuts
   focus: number; // 0 strictly these genres · 1 let it wander
   count: number; // how many stars to gather
+  year: YearRange; // optional [min, max] era the gather is constrained to; null = all years
   preset?: string;
 };
 type DriftResponse = {
@@ -112,30 +113,9 @@ type DriftResponse = {
   tracks: TrackNode[];
 };
 
-// A release-year window. null = no filter (every year passes). Tracks with no
-// known year always pass — a missing tag shouldn't drop a track from the sky.
+// A release-year window. null = no constraint (every year passes). Drives the
+// Drift era slider; sent to the server, which constrains the gather to the range.
 type YearRange = [number, number] | null;
-
-function withinYear(node: TrackNode, range: YearRange): boolean {
-  if (!range) return true;
-  const y = node.release_year;
-  if (typeof y !== "number") return true;
-  return y >= range[0] && y <= range[1];
-}
-
-// The year span across a set of tracks, or null when they don't cover at least
-// two distinct years (nothing to slice → the filter stays inert / hidden).
-function yearSpan(tracks: TrackNode[]): [number, number] | null {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const t of tracks) {
-    const y = t.release_year;
-    if (typeof y !== "number") continue;
-    if (y < lo) lo = y;
-    if (y > hi) hi = y;
-  }
-  return hi > lo ? [lo, hi] : null;
-}
 
 // BYOP: what the arrange endpoint reports about the imported playlist — the
 // source name (for the saved playlist) and an honest account of anything that
@@ -240,6 +220,33 @@ const TOKEN_KEY = "pf.spotify_token";
 // plus a flag to auto-resume the save the user clicked before signing in.
 const ROUTE_KEY = "pf.route";
 const PENDING_SAVE_KEY = "pf.pending_save";
+// The Extend walk gets the same treatment: it survives the OAuth round-trip so a
+// "save the walk" that needs sign-in completes on return, exactly like the route.
+const WALK_KEY = "pf.walk";
+const PENDING_WALK_SAVE_KEY = "pf.pending_walk_save";
+
+// Restore a persisted walk only across the OAuth redirect (?code=…), mirroring
+// the route: a plain reload / fresh visit should land on the splash, not a stale
+// walk. Returns null when there's nothing to restore.
+function readStoredWalk(): {
+  walk: TrackNode[];
+  seed: Candidate | null;
+  frame: { anchor: [number, number, number]; scale: number } | null;
+} | null {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    if (!p.get("code")) {
+      sessionStorage.removeItem(WALK_KEY);
+      return null;
+    }
+    const raw = sessionStorage.getItem(WALK_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return Array.isArray(v?.walk) && v.walk.length ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 const redirectUri = () => `${window.location.origin}/`;
 
@@ -441,16 +448,28 @@ async function fetchPlaylistTrackUris(
 function useSpotifyAuth() {
   const [clientId, setClientId] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(() => readToken());
+  // Corpus known-year span, served by /api/config — the bounds for the Drift era
+  // slider. null until config loads (the slider stays hidden without it).
+  const [yearBounds, setYearBounds] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const cfg = await request<{ spotify_client_id: string | null }>(
-          "/api/config",
-        );
+        const cfg = await request<{
+          spotify_client_id: string | null;
+          year_min?: number | null;
+          year_max?: number | null;
+        }>("/api/config");
         if (cancelled) return;
         setClientId(cfg.spotify_client_id);
+        if (
+          typeof cfg.year_min === "number" &&
+          typeof cfg.year_max === "number" &&
+          cfg.year_max > cfg.year_min
+        ) {
+          setYearBounds([cfg.year_min, cfg.year_max]);
+        }
         if (cfg.spotify_client_id) {
           const t = await completeSpotifyLogin(cfg.spotify_client_id);
           if (!cancelled && t) setToken(t);
@@ -467,7 +486,7 @@ function useSpotifyAuth() {
   const login = () => {
     if (clientId) void beginSpotifyLogin(clientId);
   };
-  return { clientId, token, login };
+  return { clientId, token, login, yearBounds };
 }
 
 const prefersReducedMotion =
@@ -1241,11 +1260,37 @@ function App() {
   // two modes: trace a route between two songs, or explore one song's
   // neighborhood in the shared embedding space.
   const [mode, setMode] = useState<
-    "route" | "explore" | "playlist" | "byop" | "drift"
-  >("route");
+    "route" | "explore" | "playlist" | "byop" | "drift" | "walk"
+  >(() => (readStoredWalk() ? "walk" : "route"));
   const [solo, setSolo] = useState<Candidate | null>(null);
   const [embed, setEmbed] = useState<EmbedResponse | null>(null);
   const [embedding, setEmbedding] = useState(false);
+  // Extend (the "walk"): a steerable walk through the taste map, seeded by one
+  // track. `walk` is the ordered head→tail of chosen tracks (each carries its
+  // real map position); `walkBuds` are the champion's placeable next-track picks
+  // budding off the head; `walkPool` caches uri→positioned node from every
+  // /api/embed neighbourhood we load, so a candidate uri can be joined to a
+  // position on the map; `walkFrame` freezes the anchor + scale that place the
+  // walk in its own sector (mirrors EmbedField). Peer of the route journey.
+  const restoredWalk = useRef(readStoredWalk());
+  const [walk, setWalk] = useState<TrackNode[]>(
+    () => restoredWalk.current?.walk ?? [],
+  );
+  const [walkSeed, setWalkSeed] = useState<Candidate | null>(
+    () => restoredWalk.current?.seed ?? null,
+  );
+  const [walkBuds, setWalkBuds] = useState<WalkBud[]>([]);
+  const [walkBusy, setWalkBusy] = useState(false);
+  const [walkDropped, setWalkDropped] = useState<{ cold: number; far: number }>({
+    cold: 0,
+    far: 0,
+  });
+  const [walkError, setWalkError] = useState<string | null>(null);
+  const [walkFrame, setWalkFrame] = useState<{
+    anchor: [number, number, number];
+    scale: number;
+  } | null>(() => restoredWalk.current?.frame ?? null);
+  const walkPool = useRef<Map<string, TrackNode>>(new Map());
   // Drift: explore by musical intent. `driftSpec` holds the blend + dials; `drift`
   // is the constellation the last Wander gathered; `drifting` gates the request.
   const [driftSpec, setDriftSpec] = useState<DriftSpec>({
@@ -1253,26 +1298,11 @@ function App() {
     familiarity: 0.35,
     focus: 0.3,
     count: 100,
+    year: null,
     preset: "nocturne",
   });
   const [drift, setDrift] = useState<DriftResponse | null>(null);
   const [drifting, setDrifting] = useState(false);
-  // Optional release-year window over the gathered constellation. Reset whenever
-  // a new sky is cast (or drift closes) so a stale window never carries over.
-  const [driftYear, setDriftYear] = useState<YearRange>(null);
-  useEffect(() => setDriftYear(null), [drift]);
-  // The window's domain is the year span of the cast constellation; it stays
-  // inert (and the control hides) unless the sky spans 2+ years. Filtering
-  // narrows the tracks the strip, sampler, save, and 3-D field all draw from.
-  const driftDomain = useMemo(() => (drift ? yearSpan(drift.tracks) : null), [drift]);
-  const activeDriftYear = driftDomain ? driftYear : null;
-  const driftView = useMemo<DriftResponse | null>(() => {
-    if (!drift) return null;
-    if (!activeDriftYear) return drift;
-    const tracks = drift.tracks.filter((t) => withinYear(t, activeDriftYear));
-    return { ...drift, tracks, count: tracks.length };
-  }, [drift, activeDriftYear]);
-  const driftHidden = drift ? drift.tracks.length - (driftView?.tracks.length ?? 0) : 0;
   // The tuning workbench is tall; once a constellation is cast we collapse it to a
   // slim bar so the map is the hero, and reopen on demand ("Tune"). Always open on
   // mobile (the controls live in their own bottom-sheet over the map) and before
@@ -1519,6 +1549,190 @@ function App() {
     setStart(candidateFromNode(n));
   };
 
+  // ---- Extend (the walk) --------------------------------------------------
+  // Load a track's neighbourhood into the walk pool (uri → positioned map node)
+  // so its uri and its neighbours' uris can be placed; returns the head node,
+  // positioned in the shared layout space.
+  const walkEmbed = async (uri: string): Promise<TrackNode | null> => {
+    const data = await request<EmbedResponse>("/api/embed", post({ uri }));
+    const pool = walkPool.current;
+    for (const n of data.cloud) pool.set(n.uri, n);
+    pool.set(data.track.uri, data.track);
+    return data.track;
+  };
+
+  // Ask the champion what comes next after the current walk, then keep the top
+  // few picks that live near the head *on the map* — join each pick's uri to a
+  // node we've loaded a position for. Picks we can't place (cold to the champion,
+  // or living elsewhere on the map) are counted honestly, not hidden.
+  const walkRefreshBuds = async (w: TrackNode[]) => {
+    const ext = await request<ExtendResponse>(
+      "/api/extend",
+      post({ prefix: w.map((n) => n.uri), k: 24 }),
+    );
+    const pool = walkPool.current;
+    const onWalk = new Set(w.map((n) => n.uri));
+    const placeable: WalkBud[] = [];
+    let far = 0;
+    for (const s of ext.suggestions) {
+      if (onWalk.has(s.uri)) continue; // never re-suggest a track already on the walk
+      const node = pool.get(s.uri);
+      if (node)
+        placeable.push({
+          uri: s.uri,
+          id: node.id,
+          name: s.name,
+          artist: s.artist,
+          genre: s.genre,
+          score: s.score,
+          position: node.position,
+          rank: 0,
+        });
+      else far += 1;
+    }
+    setWalkBuds(placeable.slice(0, 3).map((b, i) => ({ ...b, rank: i + 1 })));
+    setWalkDropped({ cold: ext.dropped.length, far });
+  };
+
+  const clearWalk = () => {
+    setWalk([]);
+    setWalkSeed(null);
+    setWalkBuds([]);
+    setWalkDropped({ cold: 0, far: 0 });
+    setWalkError(null);
+    setWalkFrame(null);
+    walkPool.current = new Map();
+  };
+
+  // Seed the walk with one track: place it as the head, load its neighbourhood
+  // (which also fixes the sector anchor + scale for the whole walk), and bud the
+  // champion's first picks off it.
+  const seedWalk = async (c: Candidate | null) => {
+    if (!c) {
+      clearWalk();
+      return;
+    }
+    setWalkSeed(c);
+    setWalkError(null);
+    setWalkBusy(true);
+    setInspect(null);
+    setEmbed(null);
+    setRoute(null);
+    setDrift(null);
+    walkPool.current = new Map();
+    try {
+      const head = await walkEmbed(c.uri);
+      if (!head) throw new Error("couldn’t place that track on the map");
+      // Freeze anchor + scale from the seed's full loaded neighbourhood, so the
+      // walk sits in one stable sector as it grows (mirrors EmbedField's scheme).
+      const anchor = new THREE.Vector3(...head.position);
+      let radius = 1e-6;
+      for (const n of walkPool.current.values())
+        radius = Math.max(radius, new THREE.Vector3(...n.position).distanceTo(anchor));
+      setWalkFrame({ anchor: head.position, scale: 8 / Math.max(radius, 1e-6) });
+      setWalk([head]);
+      await walkRefreshBuds([head]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setWalkError(
+        /cold|resolved|vocab/i.test(msg)
+          ? "That track is cold to the champion — it hasn’t heard it in a session yet. Try another."
+          : msg,
+      );
+      setWalk([]);
+      setWalkBuds([]);
+      setWalkFrame(null);
+    } finally {
+      setWalkBusy(false);
+    }
+  };
+
+  // Follow a bud: it becomes the new head, the walk grows by one, and the
+  // champion re-buds off the extended prefix. (The 3D tracer threads to it.)
+  const pickBud = async (bud: WalkBud) => {
+    if (walkBusy) return;
+    const head: TrackNode = {
+      id: bud.id,
+      uri: bud.uri,
+      name: bud.name,
+      artist: bud.artist,
+      album: null,
+      genre: bud.genre,
+      spotify_url: null,
+      fit: null,
+      position: bud.position,
+      kind: "cloud",
+    };
+    const next = [...walk, head];
+    setWalk(next);
+    setWalkBuds([]);
+    setWalkBusy(true);
+    setWalkError(null);
+    try {
+      await walkEmbed(bud.uri); // grow the pool with the new head's neighbourhood
+      await walkRefreshBuds(next);
+    } catch (e) {
+      setWalkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWalkBusy(false);
+    }
+  };
+
+  // Branch: step back to an earlier node on the walk (truncates the tail) and
+  // re-bud from there. That node's neighbourhood is already loaded, so no
+  // position refetch is needed — just re-ask the champion for the shorter prefix.
+  const walkStepBackTo = async (index: number) => {
+    if (walkBusy || index < 0 || index >= walk.length - 1) return;
+    const next = walk.slice(0, index + 1);
+    setWalk(next);
+    setWalkBuds([]);
+    setWalkBusy(true);
+    setWalkError(null);
+    try {
+      await walkRefreshBuds(next);
+    } catch (e) {
+      setWalkError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWalkBusy(false);
+    }
+  };
+
+  // Keep the walk alive across the OAuth redirect / reload (mirrors ROUTE_KEY).
+  useEffect(() => {
+    try {
+      if (walk.length > 0)
+        sessionStorage.setItem(
+          WALK_KEY,
+          JSON.stringify({ walk, seed: walkSeed, frame: walkFrame }),
+        );
+      else sessionStorage.removeItem(WALK_KEY);
+    } catch {
+      /* storage may be unavailable; the walk still works in-session */
+    }
+  }, [walk, walkSeed, walkFrame]);
+
+  // A walk restored from an OAuth round-trip has its nodes + positions but an
+  // empty pool (it lives in a ref, not storage). Re-load each node's
+  // neighbourhood once so the buds can place again, then re-bud from the head.
+  const walkRehydrated = useRef(false);
+  useEffect(() => {
+    if (walkRehydrated.current) return;
+    if (!restoredWalk.current || walk.length === 0) return;
+    walkRehydrated.current = true;
+    (async () => {
+      setWalkBusy(true);
+      try {
+        for (const n of walk) await walkEmbed(n.uri);
+        await walkRefreshBuds(walk);
+      } catch {
+        /* the walk is still saveable even if re-budding fails */
+      } finally {
+        setWalkBusy(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Drift: translate the musical dials into a corpus query and gather a
   // constellation. The same spec on repeat ("Wander again") reseeds server-side,
   // so each cast is a fresh sky within the chosen intent.
@@ -1540,6 +1754,7 @@ function App() {
           familiarity: spec.familiarity,
           focus: spec.focus,
           count: spec.count,
+          year: spec.year, // optional [min, max] era; constrains the gather
           air: spec.preset, // fallback the server uses only if genres is empty
         }),
       );
@@ -1648,23 +1863,32 @@ function App() {
           ? drift
             ? `${blendTitle(driftSpec)} · ${drift.count} songs`
             : `Drift · ${blendTitle(driftSpec)}`
-          : mode === "route"
-            ? start && end
-              ? `${start.name} → ${end.name}`
-              : start
-                ? `${start.name} → choose a destination`
-                : "Trace a journey between two songs"
-            : solo
-              ? solo.name
-              : "Explore one song’s neighbourhood";
+          : mode === "walk"
+            ? walk.length > 0
+              ? `Walk · ${walk[walk.length - 1].name}`
+              : "Extend a session into a walk"
+            : mode === "route"
+              ? start && end
+                ? `${start.name} → ${end.name}`
+                : start
+                  ? `${start.name} → choose a destination`
+                  : "Trace a journey between two songs"
+              : solo
+                ? solo.name
+                : "Explore one song’s neighbourhood";
 
   return (
     <main className="app">
       <Scene
         route={route}
         embed={embed}
-        drift={driftView}
-        idle={!route && !embed && !drift}
+        drift={drift}
+        walk={walk}
+        walkBuds={walkBuds}
+        walkFrame={walkFrame}
+        onPickBud={(b) => void pickBud(b)}
+        onStepBack={(i) => void walkStepBackTo(i)}
+        idle={!route && !embed && !drift && walk.length === 0}
         focus={focus}
         onFocus={setFocus}
         onInspect={setInspect}
@@ -1705,6 +1929,8 @@ function App() {
               <ListMusic size={15} />
             ) : mode === "drift" ? (
               <Wind size={15} />
+            ) : mode === "walk" ? (
+              <ChevronsRight size={15} />
             ) : (
               <Orbit size={15} />
             )}
@@ -1726,7 +1952,9 @@ function App() {
                   ? "Bring your own playlist"
                   : mode === "drift"
                     ? "Drift by feel"
-                    : "Explore a song"}
+                    : mode === "walk"
+                      ? "Extend a session"
+                      : "Explore a song"}
             </span>
             <button
               className="sheetClose"
@@ -1772,6 +2000,14 @@ function App() {
                 onClick={() => setMode("byop")}
               >
                 <ListMusic size={14} aria-hidden /> <span>Your playlist</span>
+              </button>
+              <button
+                role="tab"
+                className={mode === "walk" ? "on" : ""}
+                aria-selected={mode === "walk"}
+                onClick={() => setMode("walk")}
+              >
+                <ChevronsRight size={14} aria-hidden /> <span>Extend</span>
               </button>
             </div>
           )}
@@ -1834,6 +2070,7 @@ function App() {
             <DriftPanel
               spec={driftSpec}
               catalog={genreCatalog}
+              yearBounds={auth.yearBounds}
               onChange={setDriftSpec}
               onWander={() => void runDrift(driftSpec)}
               busy={drifting}
@@ -1848,6 +2085,13 @@ function App() {
               onArrange={runArrange}
               arranging={arranging}
               onError={setError}
+            />
+          ) : mode === "walk" ? (
+            <WalkComposer
+              seed={walkSeed}
+              onSeed={(c) => void seedWalk(c)}
+              active={walk.length > 0}
+              busy={walkBusy}
             />
           ) : (
             <div className="composeHint">
@@ -1878,7 +2122,7 @@ function App() {
         aria-hidden
       />
 
-      {!route && !embed && !drift && !drifting && status === "idle" && !arranging && (
+      {!route && !embed && !drift && !drifting && status === "idle" && !arranging && walk.length === 0 && (
         <Intro
           mode={mode}
           ready={
@@ -1886,7 +2130,9 @@ function App() {
               ? !!start && !!end
               : mode === "drift"
                 ? true
-                : !!solo
+                : mode === "walk"
+                  ? !!walkSeed
+                  : !!solo
           }
           compact={isMobile}
         />
@@ -1979,9 +2225,9 @@ function App() {
         />
       )}
 
-      {driftView && (
+      {drift && (
         <DriftResult
-          drift={driftView}
+          drift={drift}
           title={blendTitle(driftSpec)}
           onWander={() => void runDrift(driftSpec)}
           onInspect={setInspect}
@@ -1992,10 +2238,25 @@ function App() {
           onError={setError}
           playingId={playback.playingId}
           onAudition={playback.toggleTrack}
-          yearDomain={driftDomain}
-          yearRange={driftYear}
-          onYearRange={setDriftYear}
-          yearHidden={driftHidden}
+        />
+      )}
+
+      {mode === "walk" && walk.length > 0 && (
+        <WalkPanel
+          walk={walk}
+          buds={walkBuds}
+          dropped={walkDropped}
+          busy={walkBusy}
+          error={walkError}
+          seedName={walkSeed?.name ?? walk[0]?.name ?? ""}
+          onPick={(b) => void pickBud(b)}
+          onStepBack={(i) => void walkStepBackTo(i)}
+          onInspect={setInspect}
+          onClear={clearWalk}
+          token={auth.token}
+          canSave={!!auth.clientId}
+          onLogin={auth.login}
+          onError={setError}
         />
       )}
 
@@ -2183,6 +2444,388 @@ function TrackPicker({
         </div>
       )}
     </div>
+  );
+}
+
+// ===========================================================================
+// Extend — the promoted next-track champion (R'+M+C') as a steerable walk
+// through the taste map. The champion (POST /api/extend) ranks what comes next
+// after the current walk; the placeable picks bud off the head as glowing nodes
+// in the 3D scene (WalkField, below). It's a peer of the A→B route journey — a
+// second way to build a playlist. Contract types are shared with the walk state
+// in App; the champion runs in-browser (WASM), independent of the map corpus.
+// ===========================================================================
+type ExtendSuggestion = {
+  item_index: number;
+  uri: string;
+  name: string;
+  artist: string;
+  genre: string;
+  score: number;
+};
+type ExtendResponse = {
+  k: number;
+  prefix_indices: number[];
+  dropped: string[];
+  vocab: number;
+  suggestions: ExtendSuggestion[];
+};
+
+// A champion next-track pick that we could place on the map (its uri joined to a
+// node position in a loaded neighbourhood). It buds off the current head.
+type WalkBud = {
+  uri: string;
+  id: string;
+  name: string;
+  artist: string;
+  genre: string;
+  score: number;
+  position: [number, number, number];
+  rank: number;
+};
+
+// Injected style for the Extend chrome — same token vocabulary as the rest of
+// the app (engraved cards, --signal / --cool accents, --serif titles, --mono
+// micro-labels), no new visual system. Injected by WalkComposer, which is
+// mounted for the whole of walk mode (so the panel below can rely on it).
+const WALK_CSS = `
+.walkSeedHint{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.walkSeedHint svg{color:var(--signal);flex:0 0 auto;}
+.wk-panel{position:absolute;top:76px;right:16px;bottom:16px;width:min(340px,calc(100vw - 32px));z-index:20;
+  display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel);box-shadow:var(--bezel),var(--shadow);backdrop-filter:blur(20px);
+  animation:wkRise .4s var(--ease) both;overflow:hidden;}
+@keyframes wkRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.wk-panel{animation:none;}}
+.wk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:12px 12px 10px 14px;border-bottom:1px solid var(--line);}
+.wk-kicker{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--signal);}
+.wk-x{background:none;border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--ink-2);
+  width:28px;height:28px;display:grid;place-items:center;cursor:pointer;flex:0 0 auto;
+  transition:color .18s var(--ease),border-color .18s var(--ease);}
+.wk-x:hover{color:var(--danger);border-color:var(--line-2);}
+.wk-body{overflow-y:auto;padding:12px 14px 4px;flex:1 1 auto;}
+.wk-meta{margin:0 0 12px;font-size:12.5px;line-height:1.5;color:var(--ink-2);}
+.wk-meta b{color:var(--ink);font-family:var(--mono);font-weight:600;}
+.wk-meta em{color:var(--ink);font-style:normal;}
+.wk-seclabel{margin:0 0 8px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-2);}
+.wk-seq{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:5px;}
+.wk-step{width:100%;display:flex;align-items:center;gap:10px;padding:7px 9px;text-align:left;cursor:pointer;
+  border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--slot);color:var(--ink);
+  transition:border-color .18s var(--ease),background .18s var(--ease);}
+.wk-step:hover{border-color:var(--line-2);}
+.wk-step:focus-visible{outline:2px solid var(--cool);outline-offset:1px;}
+.wk-seq li.head .wk-step{border-color:var(--signal);background:var(--signal-deep);cursor:default;}
+.wk-n{flex:0 0 auto;width:12px;height:12px;border-radius:999px;background:var(--g,var(--cool));
+  box-shadow:0 0 8px var(--g,var(--cool));}
+.wk-txt{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.wk-txt b{font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wk-txt small{font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wk-badge{flex:0 0 auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--signal);border:1px solid var(--signal);border-radius:999px;padding:2px 7px;}
+.wk-back{flex:0 0 auto;color:var(--ink-3);transform:rotate(180deg);}
+.wk-step:hover .wk-back{color:var(--cool);}
+.wk-hint{margin:0 0 12px;font-size:11.5px;line-height:1.55;color:var(--ink-2);}
+.wk-buds{margin-top:2px;}
+.wk-budlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.wk-bud{width:100%;display:flex;align-items:center;gap:10px;padding:9px 10px;text-align:left;cursor:pointer;
+  border:1px solid var(--line-2);border-radius:var(--radius-sm);background:var(--deck);color:var(--ink);
+  transition:border-color .18s var(--ease),transform .18s var(--ease),background .18s var(--ease);}
+.wk-bud:hover{border-color:var(--signal);transform:translateX(2px);}
+.wk-bud:focus-visible{outline:2px solid var(--cool);outline-offset:1px;}
+.wk-rank{flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;border-radius:999px;
+  font-family:var(--mono);font-size:11px;font-weight:600;color:#04060f;background:var(--g,var(--cool));
+  box-shadow:0 0 10px var(--g,var(--cool));}
+.wk-go{flex:0 0 auto;color:var(--ink-3);}
+.wk-bud:hover .wk-go{color:var(--signal);}
+.wk-load{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);margin:2px 0;}
+.wk-drop{margin:10px 0 2px;font-size:11px;line-height:1.5;color:var(--ink-2);}
+.wk-err{margin:10px 0 0;font-size:12px;color:var(--danger);}
+.wk-actions{flex:0 0 auto;display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line);}
+.wk-save{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:none;border-radius:var(--radius-sm);padding:10px 14px;font-weight:700;font-size:12.5px;cursor:pointer;
+  background:var(--signal);color:#20030d;transition:filter .18s var(--ease);}
+.wk-save:hover:not(:disabled){filter:brightness(1.08);}
+.wk-save:disabled{opacity:.4;cursor:not-allowed;}
+.wk-save.saved{background:none;border:1px solid var(--line-2);color:var(--ink);text-decoration:none;}
+.wk-save .spin{color:#20030d;}
+@media (max-width: 760px){
+  .wk-panel{top:auto;left:16px;right:16px;bottom:16px;width:auto;max-height:46vh;}
+}
+`;
+
+// Walk-mode header controls: the seed picker (reuses TrackPicker) + a one-line
+// hint. Selecting a track seeds/reseeds the walk; clearing it clears the walk.
+function WalkComposer({
+  seed,
+  onSeed,
+  active,
+  busy,
+}: {
+  seed: Candidate | null;
+  onSeed: (c: Candidate | null) => void;
+  active: boolean;
+  busy: boolean;
+}) {
+  return (
+    <>
+      <style>{WALK_CSS}</style>
+      <TrackPicker
+        label={active ? "Reseed" : "Seed"}
+        selected={seed}
+        onSelect={onSeed}
+      />
+      <span className="walkSeedHint">
+        {busy ? (
+          <>
+            <Loader2 size={13} className="spin" aria-hidden /> placing on the map…
+          </>
+        ) : active ? (
+          <>
+            <ChevronsRight size={13} aria-hidden /> pick a glowing bud to walk on
+          </>
+        ) : (
+          <>
+            <ChevronsRight size={13} aria-hidden /> one song to start the walk
+          </>
+        )}
+      </span>
+    </>
+  );
+}
+
+// The walk read-out + controls: the ordered walk (click an earlier track to
+// branch back to it), the champion's placeable next-track picks as buttons
+// (keyboard-selectable, mirroring the glowing buds on the map), an honest note
+// about picks we couldn't place, and Save (identical flow to the route journey).
+function WalkPanel({
+  walk,
+  buds,
+  dropped,
+  busy,
+  error,
+  seedName,
+  onPick,
+  onStepBack,
+  onInspect,
+  onClear,
+  token,
+  canSave,
+  onLogin,
+  onError,
+}: {
+  walk: TrackNode[];
+  buds: WalkBud[];
+  dropped: { cold: number; far: number };
+  busy: boolean;
+  error: string | null;
+  seedName: string;
+  onPick: (b: WalkBud) => void;
+  onStepBack: (i: number) => void;
+  onInspect: (n: TrackNode | null) => void;
+  onClear: () => void;
+  token: string | null;
+  canSave: boolean;
+  onLogin: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const headIndex = walk.length - 1;
+  const seedKey = walk[0]?.uri ?? null;
+  const [saving, setSaving] = useState(false);
+  const [playlistUrl, setPlaylistUrl] = useState<string | null>(null);
+  // a fresh walk (new seed) clears any earlier saved-playlist link
+  useEffect(() => setPlaylistUrl(null), [seedKey]);
+
+  const save = async () => {
+    if (!token) {
+      sessionStorage.setItem(PENDING_WALK_SAVE_KEY, "1");
+      onLogin();
+      return;
+    }
+    setSaving(true);
+    onError(null);
+    try {
+      const uris = walk.map((n) => n.uri).filter(Boolean);
+      const head = walk[headIndex];
+      const url = await createJourneyPlaylist(
+        token,
+        `Extended · ${seedName}`,
+        `A ${uris.length}-track walk from ${seedName} to ${head.name}, extended track by track with the next-track champion.`,
+        uris,
+      );
+      setPlaylistUrl(url);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        sessionStorage.setItem(PENDING_WALK_SAVE_KEY, "1");
+        onLogin();
+        return;
+      }
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  // resume the save the listener clicked before signing in (survives the OAuth
+  // round-trip because the walk is persisted; mirrors the route composer)
+  useEffect(() => {
+    if (token && sessionStorage.getItem(PENDING_WALK_SAVE_KEY)) {
+      sessionStorage.removeItem(PENDING_WALK_SAVE_KEY);
+      void save();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  return (
+    <aside className="wk-panel" aria-label="Extend — your walk">
+      <div className="wk-head">
+        <span className="wk-kicker">
+          <ChevronsRight size={13} aria-hidden /> Extend
+        </span>
+        <button className="wk-x" onClick={onClear} aria-label="Clear the walk and start over">
+          <Trash2 size={14} aria-hidden />
+        </button>
+      </div>
+
+      <div className="wk-body">
+        <p className="wk-meta">
+          <b>{walk.length}</b> track{walk.length === 1 ? "" : "s"} · a walk from{" "}
+          <em>{seedName}</em>
+        </p>
+
+        <p className="wk-seclabel">Your walk</p>
+        <ol className="wk-seq" aria-label="Your walk, in play order">
+          {walk.map((n, i) => {
+            const head = i === headIndex;
+            return (
+              <li key={`${n.uri}-${i}`} className={head ? "head" : ""}>
+                <button
+                  className="wk-step"
+                  onClick={() => (head ? onInspect(n) : onStepBack(i))}
+                  title={
+                    head
+                      ? "The current head of your walk"
+                      : `Branch back to ${n.name}`
+                  }
+                  aria-label={
+                    head
+                      ? `Head: ${n.name} by ${n.artist}`
+                      : `Branch back to ${n.name} by ${n.artist}`
+                  }
+                >
+                  <span
+                    className="wk-n"
+                    style={{ "--g": genreColor(n.genre) } as React.CSSProperties}
+                  />
+                  <span className="wk-txt">
+                    <b>{n.name}</b>
+                    <small>{n.artist}</small>
+                  </span>
+                  {head ? (
+                    <span className="wk-badge">head</span>
+                  ) : (
+                    <ChevronsRight className="wk-back" size={14} aria-hidden />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="wk-buds">
+          <p className="wk-seclabel">Next-track picks</p>
+          <p className="wk-hint">
+            The glowing buds on the map are the champion’s next-track picks that
+            live near the head — choose your path.
+          </p>
+          {busy ? (
+            <p className="wk-load">
+              <Loader2 size={14} className="spin" aria-hidden /> asking the
+              champion…
+            </p>
+          ) : buds.length ? (
+            <ul className="wk-budlist">
+              {buds.map((b) => (
+                <li key={b.uri}>
+                  <button
+                    className="wk-bud"
+                    onClick={() => onPick(b)}
+                    aria-label={`Follow pick ${b.rank}: ${b.name} by ${b.artist}, ${b.genre}`}
+                  >
+                    <span
+                      className="wk-rank"
+                      style={{ "--g": genreColor(b.genre) } as React.CSSProperties}
+                    >
+                      {b.rank}
+                    </span>
+                    <span className="wk-txt">
+                      <b>{b.name}</b>
+                      <small>
+                        {b.artist} · {b.genre}
+                      </small>
+                    </span>
+                    <ChevronsRight className="wk-go" size={16} aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="wk-hint">
+              No picks land near here on the map — branch back to an earlier
+              track, or reseed.
+            </p>
+          )}
+          {(dropped.far > 0 || dropped.cold > 0) && (
+            <p className="wk-drop">
+              {dropped.far > 0 &&
+                `${dropped.far} more of the champion’s picks live elsewhere on the map — not shown here. `}
+              {dropped.cold > 0 &&
+                `${dropped.cold} were cold to the champion and skipped.`}
+            </p>
+          )}
+        </div>
+
+        {error && <p className="wk-err">{error}</p>}
+      </div>
+
+      {canSave && (
+        <div className="wk-actions">
+          {playlistUrl ? (
+            <a
+              className="wk-save saved"
+              href={playlistUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={15} aria-hidden />
+              <span>Open playlist in Spotify</span>
+            </a>
+          ) : (
+            <button
+              className="wk-save"
+              disabled={walk.length < 2 || saving}
+              onClick={() => void save()}
+              title={
+                walk.length < 2
+                  ? "Follow at least one bud to build a playlist"
+                  : "Save this walk as a Spotify playlist"
+              }
+            >
+              {saving ? (
+                <Loader2 size={15} className="spin" aria-hidden />
+              ) : token ? (
+                <Sparkles size={15} aria-hidden />
+              ) : (
+                <LogIn size={15} aria-hidden />
+              )}
+              <span>{saving ? "Saving" : "Save as playlist"}</span>
+            </button>
+          )}
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -2610,6 +3253,7 @@ function GenrePicker({
 function DriftPanel({
   spec,
   catalog,
+  yearBounds,
   onChange,
   onWander,
   busy,
@@ -2620,6 +3264,7 @@ function DriftPanel({
 }: {
   spec: DriftSpec;
   catalog: GenreCount[] | null;
+  yearBounds: [number, number] | null; // corpus year span; null hides the era slider
   onChange: (s: DriftSpec) => void;
   onWander: () => void;
   busy: boolean;
@@ -2645,6 +3290,13 @@ function DriftPanel({
   // Editing genres by hand drops the preset badge — it's a custom blend now.
   const setGenres = (genres: string[]) =>
     onChange({ ...spec, genres, preset: undefined });
+  // The era window. A range spanning the whole domain (or a clear) means "no
+  // constraint" → null, so the gather isn't needlessly narrowed.
+  const setYear = (r: YearRange) => {
+    const full =
+      !r || !yearBounds || (r[0] <= yearBounds[0] && r[1] >= yearBounds[1]);
+    onChange({ ...spec, year: full ? null : r });
+  };
 
   // Collapsed: a slim bar that keeps the map visible. Re-open with "Tune".
   if (!open) {
@@ -2734,6 +3386,15 @@ function DriftPanel({
           value={spec.focus}
           onChange={(v) => onChange({ ...spec, focus: v })}
         />
+        {yearBounds && (
+          <div className="driftYears">
+            <YearFilter
+              domain={yearBounds}
+              range={spec.year ?? yearBounds}
+              onChange={setYear}
+            />
+          </div>
+        )}
         <button
           className="trace"
           onClick={onWander}
@@ -2756,7 +3417,7 @@ function Intro({
   ready,
   compact,
 }: {
-  mode: "route" | "explore" | "playlist" | "byop" | "drift";
+  mode: "route" | "explore" | "playlist" | "byop" | "drift" | "walk";
   ready: boolean;
   compact: boolean;
 }) {
@@ -2785,6 +3446,25 @@ function Intro({
           {compact
             ? "Tap the bar above to add a playlist."
             : "Paste a public link, or connect your account to pick one."}
+        </p>
+      </div>
+    );
+  }
+  if (mode === "walk") {
+    return (
+      <div className="intro">
+        <h1>Walk the map, one track at a time</h1>
+        <p>
+          Seed a song, and the next-track champion buds a few places it could go.
+          Follow one — the trail threads across the map — then keep choosing your
+          path.
+        </p>
+        <p className="cue">
+          {ready
+            ? "Placing your seed…"
+            : compact
+              ? "Tap the bar above to choose a starting song."
+              : "Choose a song above to begin the walk."}
         </p>
       </div>
     );
@@ -2899,10 +3579,11 @@ function EmbedPanel({
 // The intent stays music-forward (an air + a plain-language note); the honest
 // part is the genres actually present. Wander again reseeds within the same
 // intent; save turns the whole constellation into a Spotify playlist.
-// Year filter: constrain a set of tracks to a release-year window. A dual-thumb
-// range over the span of years present; only the thumbs take pointer events so
-// both handles stay grabbable. Hidden by the caller when there's nothing to
-// slice (fewer than two distinct years).
+// Year filter: constrain the gather to a release-year window. A dual-thumb range
+// over the domain of years. Driven by explicit pointer handling on a single
+// track (the nearest thumb takes the drag) rather than two overlapping native
+// range inputs — the latter is a notorious source of "one thumb jumps to the
+// end" bugs, since whichever input paints on top swallows every interaction.
 function YearFilter({
   domain,
   range,
@@ -2912,51 +3593,113 @@ function YearFilter({
   domain: [number, number];
   range: [number, number];
   onChange: (r: YearRange) => void;
-  hidden: number;
+  hidden?: number; // post-filter only: how many tracks the window hides (omit pre-drift)
 }) {
   const [dMin, dMax] = domain;
   const [from, to] = range;
   const span = Math.max(1, dMax - dMin);
-  const lo = ((from - dMin) / span) * 100;
-  const hi = ((to - dMin) / span) * 100;
+  const pct = (y: number) => ((y - dMin) / span) * 100;
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef<"from" | "to" | null>(null);
   const active = from > dMin || to < dMax;
+
+  // Map a pointer x to a (clamped, integer) year across the track's width.
+  const yearAt = (clientX: number): number => {
+    const el = trackRef.current;
+    if (!el) return from;
+    const rect = el.getBoundingClientRect();
+    const t = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)));
+    return Math.round(dMin + t * span);
+  };
+  // Move one thumb, never letting the handles cross.
+  const apply = (which: "from" | "to", y: number) => {
+    if (which === "from") onChange([Math.min(y, to), to]);
+    else onChange([from, Math.max(y, from)]);
+  };
+  const grab = (e: React.PointerEvent) => {
+    const y = yearAt(e.clientX);
+    const tag = (e.target as HTMLElement).dataset?.thumb;
+    // A press on a thumb drags that thumb; a press on the track grabs the nearer
+    // one — so there's no ambiguity about which handle moves.
+    const which: "from" | "to" =
+      tag === "from" || tag === "to"
+        ? tag
+        : Math.abs(y - from) <= Math.abs(y - to)
+          ? "from"
+          : "to";
+    dragging.current = which;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    apply(which, y);
+  };
+  const move = (e: React.PointerEvent) => {
+    if (dragging.current) apply(dragging.current, yearAt(e.clientX));
+  };
+  const release = (e: React.PointerEvent) => {
+    dragging.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+  };
+  const key = (which: "from" | "to") => (e: React.KeyboardEvent) => {
+    const step =
+      e.key === "ArrowLeft" || e.key === "ArrowDown"
+        ? -1
+        : e.key === "ArrowRight" || e.key === "ArrowUp"
+          ? 1
+          : 0;
+    if (!step) return;
+    e.preventDefault();
+    apply(which, (which === "from" ? from : to) + step);
+  };
+
   return (
     <div className="years">
       <span className="yearsLabel">
         <CalendarRange size={13} aria-hidden /> Years
       </span>
       <div
+        ref={trackRef}
         className="yearsSlider"
-        style={{ "--lo": `${lo}%`, "--hi": `${hi}%` } as React.CSSProperties}
+        onPointerDown={grab}
+        onPointerMove={move}
+        onPointerUp={release}
+        onPointerCancel={release}
+        style={{ "--lo": `${pct(from)}%`, "--hi": `${pct(to)}%` } as React.CSSProperties}
       >
         <span className="yearsTrack" aria-hidden />
         <span className="yearsFill" aria-hidden />
-        <input
+        <button
+          type="button"
+          data-thumb="from"
           className="yearsThumb"
-          type="range"
-          min={dMin}
-          max={dMax}
-          step={1}
-          value={from}
-          onChange={(e) => onChange([Math.min(Number(e.target.value), to), to])}
+          style={{ left: `${pct(from)}%` }}
+          role="slider"
           aria-label="Earliest release year"
+          aria-valuemin={dMin}
+          aria-valuemax={to}
+          aria-valuenow={from}
           aria-valuetext={`from ${from}`}
+          onKeyDown={key("from")}
         />
-        <input
+        <button
+          type="button"
+          data-thumb="to"
           className="yearsThumb"
-          type="range"
-          min={dMin}
-          max={dMax}
-          step={1}
-          value={to}
-          onChange={(e) => onChange([from, Math.max(Number(e.target.value), from)])}
+          style={{ left: `${pct(to)}%` }}
+          role="slider"
           aria-label="Latest release year"
+          aria-valuemin={from}
+          aria-valuemax={dMax}
+          aria-valuenow={to}
           aria-valuetext={`to ${to}`}
+          onKeyDown={key("to")}
         />
       </div>
       <span className="yearsReadout" aria-live="polite">
         <b>{from}</b>–<b>{to}</b>
-        {hidden > 0 && <span className="yearsHidden"> · {hidden} hidden</span>}
+        {(hidden ?? 0) > 0 && <span className="yearsHidden"> · {hidden} hidden</span>}
       </span>
       {active && (
         <button
@@ -2984,10 +3727,6 @@ function DriftResult({
   onError,
   playingId,
   onAudition,
-  yearDomain,
-  yearRange,
-  onYearRange,
-  yearHidden,
 }: {
   drift: DriftResponse;
   title: string;
@@ -3000,10 +3739,6 @@ function DriftResult({
   onError: (msg: string | null) => void;
   playingId: string | null;
   onAudition: (n: TrackNode) => void;
-  yearDomain: [number, number] | null;
-  yearRange: YearRange;
-  onYearRange: (r: YearRange) => void;
-  yearHidden: number;
 }) {
   // The result's accent takes the dominant genre's colour, so the strip belongs
   // to the same legend as the stars on the map.
@@ -3014,14 +3749,6 @@ function DriftResult({
     drift.familiarity < 0.38 ? "mainstream" : drift.familiarity > 0.62 ? "deep cuts" : "mixed";
   const foc = drift.focus < 0.38 ? "tight" : drift.focus > 0.62 ? "wandering" : "balanced";
   const descriptor = `${fam} · ${foc}`;
-
-  // The clamped window the year handles sit at (App owns the raw range + domain).
-  const yearWindow: [number, number] | null = yearDomain
-    ? [
-        Math.max(yearDomain[0], yearRange?.[0] ?? yearDomain[0]),
-        Math.min(yearDomain[1], yearRange?.[1] ?? yearDomain[1]),
-      ]
-    : null;
 
   // The list lives in a side drawer you can collapse to hand the whole screen to
   // the map, then pull back with the edge tab. A fresh constellation reopens it.
@@ -3183,17 +3910,6 @@ function DriftResult({
             </span>
           ))}
         </div>
-
-        {yearDomain && yearWindow && (
-          <div className="driftYears">
-            <YearFilter
-              domain={yearDomain}
-              range={yearWindow}
-              onChange={onYearRange}
-              hidden={yearHidden}
-            />
-          </div>
-        )}
 
         <div className="driftList">
           {sampler.map((n) => {
@@ -3856,6 +4572,11 @@ function Scene({
   route,
   embed,
   drift,
+  walk,
+  walkBuds,
+  walkFrame,
+  onPickBud,
+  onStepBack,
   idle,
   focus,
   onFocus,
@@ -3874,13 +4595,18 @@ function Scene({
   route: RouteResponse | null;
   embed: EmbedResponse | null;
   drift: DriftResponse | null;
+  walk: TrackNode[];
+  walkBuds: WalkBud[];
+  walkFrame: { anchor: [number, number, number]; scale: number } | null;
+  onPickBud: (b: WalkBud) => void;
+  onStepBack: (i: number) => void;
   idle: boolean;
   focus: number | null;
   onFocus: (i: number | null) => void;
   onInspect: (n: TrackNode | null) => void;
   warp: boolean;
   includedIds: Set<string>;
-  mode: "route" | "explore" | "playlist" | "byop" | "drift";
+  mode: "route" | "explore" | "playlist" | "byop" | "drift" | "walk";
   reachCloud: ReachStop[];
   reach: number;
   curation: Curation;
@@ -3890,12 +4616,16 @@ function Scene({
   playKey: string | null;
 }) {
   const composing = mode === "playlist" && !!route;
+  const walkActive = walk.length > 0;
+  // The walk starts fresh (and re-flies the camera) only when its seed changes,
+  // not on every step — key the fly-in / splash-recede on the seed's uri.
+  const walkSeedKey = walk[0]?.uri ?? null;
   // The route / explored track lives in its own sector (ROUTE_SECTOR) away from
   // the splash cloud. While the camera travels there we keep the splash cloud
   // mounted so it recedes into the fog behind us instead of cutting away —
   // that's the visual continuity. It unmounts only once the camera has arrived.
   const [arrived, setArrived] = useState(false);
-  useEffect(() => setArrived(false), [route, embed, drift]);
+  useEffect(() => setArrived(false), [route, embed, drift, walkSeedKey]);
 
   // The splash cloud is anchored at the origin (centred on the random sample's
   // centroid in the shared global layout). We remember that centroid so a traced
@@ -3932,7 +4662,7 @@ function Scene({
   }, [focus]);
   useEffect(() => {
     manual.current = false;
-  }, [route, embed, drift]);
+  }, [route, embed, drift, walkSeedKey]);
 
   return (
     <Canvas
@@ -3970,7 +4700,7 @@ function Scene({
           fade
           speed={prefersReducedMotion ? 0 : 0.5}
         />
-        {((!route && !embed && !drift) || !arrived) && (
+        {((!route && !embed && !drift && !walkActive) || !arrived) && (
           <IdleField
             paused={splashPaused}
             onInspect={(n) => {
@@ -3981,6 +4711,22 @@ function Scene({
             }}
             onCenter={requestCenter}
             onCentroid={(c) => (splashCentroid.current = c)}
+            selKey={selKey}
+            playKey={playKey}
+          />
+        )}
+        {walkActive && walkFrame && (
+          <WalkField
+            walk={walk}
+            buds={walkBuds}
+            frame={walkFrame}
+            seedKey={walkSeedKey}
+            onPickBud={onPickBud}
+            onStepBack={onStepBack}
+            onInspect={onInspect}
+            onCenter={requestCenter}
+            onArrive={() => setArrived(true)}
+            splashCentroid={splashCentroid.current}
             selKey={selKey}
             playKey={playKey}
           />
@@ -5017,6 +5763,499 @@ function EmbedField({
         onArrive={onArrive}
       />
     </group>
+  );
+}
+
+// ===========================================================================
+// The Extend walk — a steerable walk through the taste map, in the same 3-D
+// language as the route: real map positions, genre hues, the hot-magenta SIGNAL
+// tracer, depth fog. The walk lives in its own sector (anchor + scale frozen at
+// seed time, exactly like EmbedField). The champion's placeable next-track picks
+// bud off the current head as glowing nodes; picking one threads the tracer to
+// it and grows the walk; clicking an earlier node branches back to it.
+// ===========================================================================
+function WalkField({
+  walk,
+  buds,
+  frame,
+  seedKey,
+  onPickBud,
+  onStepBack,
+  onInspect,
+  onCenter,
+  onArrive,
+  splashCentroid,
+  selKey,
+  playKey,
+}: {
+  walk: TrackNode[];
+  buds: WalkBud[];
+  frame: { anchor: [number, number, number]; scale: number };
+  seedKey: string | null;
+  onPickBud: (b: WalkBud) => void;
+  onStepBack: (i: number) => void;
+  onInspect: (n: TrackNode | null) => void;
+  onCenter: (world: THREE.Vector3) => void;
+  onArrive: () => void;
+  splashCentroid: THREE.Vector3 | null;
+  selKey: string | null;
+  playKey: string | null;
+}) {
+  // Freeze the splash centroid at mount (same reason as EmbedField: the idle
+  // field updates it asynchronously, and we don't want the sector to jump).
+  const frozen = useRef<THREE.Vector3 | null>(splashCentroid);
+  if (frozen.current == null && splashCentroid != null)
+    frozen.current = splashCentroid;
+
+  // Lay the walk out for legibility rather than as raw map coordinates (a walk
+  // through a tight genre cluster would otherwise collapse to a knot, since the
+  // tracks nearly coincide in the map). The join to a real map position is what
+  // makes a pick *placeable* (done upstream); here we render it as a clear path:
+  // the trail steps forward by a fixed STEP, and the buds fan out AHEAD of the
+  // head. Each node's scene position is cached by uri, so when a bud is picked it
+  // keeps the exact spot it budded at — following a bud is seamless, no jump.
+  const STEP = 2.6;
+  const headIndex = walk.length - 1;
+  const headUri = walk[headIndex]?.uri ?? null;
+  const UP = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+
+  // Scene positions cached per head→track transition (`fromUri>toUri`), so the
+  // spot a bud fans to is exactly where it lands as the head if picked — even if
+  // the same track buds off two different heads later. Reset when the seed does.
+  const posCache = useRef<Map<string, THREE.Vector3>>(new Map());
+  const posSeed = useRef<string | null>(null);
+  if (posSeed.current !== seedKey) {
+    posCache.current = new Map();
+    posSeed.current = seedKey;
+  }
+  const DEFAULT_FWD = useMemo(
+    () => new THREE.Vector3(0.2, 0.12, 1).normalize(),
+    [],
+  );
+
+  const { origin, camGoal, walkScene, budScene } = useMemo(() => {
+    const anchor = new THREE.Vector3(...frame.anchor);
+    const base = frozen.current;
+    const offset = base ? anchor.clone().sub(base) : ROUTE_SECTOR.clone();
+    const l = offset.length();
+    if (l < 14)
+      offset.copy(l > 1e-3 ? offset.multiplyScalar(14 / l) : ROUTE_SECTOR);
+    const cache = posCache.current;
+
+    // Walk nodes: each committed node reuses the exact spot it budded at (the
+    // `prevUri>uri` transition, cached when it was a bud). The seed sits at the
+    // sector origin; a node with no cached spot (a walk restored across the OAuth
+    // round-trip) is placed a STEP forward from the previous one.
+    const scene: THREE.Vector3[] = [];
+    for (let k = 0; k < walk.length; k += 1) {
+      let p: THREE.Vector3 | undefined;
+      if (k === 0) {
+        p = cache.get(walk[0].uri) ?? offset.clone();
+        cache.set(walk[0].uri, p);
+      } else {
+        p = cache.get(`${walk[k - 1].uri}>${walk[k].uri}`);
+        if (!p) {
+          const prev = scene[k - 1];
+          const fwd =
+            k >= 2 ? prev.clone().sub(scene[k - 2]).normalize() : DEFAULT_FWD.clone();
+          p = prev.clone().add(fwd.multiplyScalar(STEP));
+        }
+      }
+      scene.push(p);
+    }
+    const head = scene[scene.length - 1] ?? offset.clone();
+    // "forward" = the way we're heading, so buds fan ahead of the trail, not over it
+    const forward =
+      scene.length >= 2
+        ? head.clone().sub(scene[scene.length - 2]).normalize()
+        : DEFAULT_FWD.clone();
+    // Fan the buds ahead of the head: a deterministic spread so they never stack,
+    // even when their map directions coincide. Cache each under its transition key
+    // so following it is seamless.
+    const n = buds.length;
+    const bScene = buds.map((b, i) => {
+      const a = (i - (n - 1) / 2) * 0.62; // ~35° between buds
+      const dir = forward.clone().applyAxisAngle(UP, a);
+      dir.y += (i % 2 === 0 ? 0.16 : -0.16); // slight vertical tier
+      dir.normalize();
+      const p = head.clone().add(dir.multiplyScalar(STEP));
+      cache.set(`${headUri}>${b.uri}`, p);
+      return p;
+    });
+    return {
+      origin: offset.clone(),
+      camGoal: offset
+        .clone()
+        .add(new THREE.Vector3(0.3, 0.42, 1).normalize().multiplyScalar(9.5)),
+      walkScene: scene,
+      budScene: bScene,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walk, buds, seedKey, frame.anchor[0], frame.anchor[1], frame.anchor[2]]);
+
+  const toArr = (v: THREE.Vector3): [number, number, number] => [v.x, v.y, v.z];
+
+  // Follow the walk: gently recenter the orbit pivot on the new head each step
+  // (skip the seed — the fly-in already frames it). Uses the same one-shot tween
+  // as double-click-to-center, so it never fights the user's orbit.
+  const lastHead = useRef<string | null>(null);
+  useEffect(() => {
+    if (headUri && headUri !== lastHead.current) {
+      const first = lastHead.current === null;
+      lastHead.current = headUri;
+      if (!first && walkScene[headIndex]) onCenter(walkScene[headIndex].clone());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headUri]);
+
+  // faint tethers from the head to each bud, so the buds read as branching off it
+  const budSpokes = useMemo(() => {
+    const h = walkScene[headIndex];
+    if (!h) return new Float32Array(0);
+    const segs: number[] = [];
+    for (const p of budScene) segs.push(h.x, h.y, h.z, p.x, p.y, p.z);
+    return new Float32Array(segs);
+  }, [walkScene, budScene, headIndex]);
+
+  return (
+    <group>
+      <WalkTrail pts={walkScene} />
+      {walk.length >= 2 && !prefersReducedMotion && walkScene[headIndex - 1] && (
+        <ThreadGlow
+          key={walk.length}
+          from={walkScene[headIndex - 1]}
+          to={walkScene[headIndex]}
+        />
+      )}
+      {budSpokes.length > 0 && (
+        <WebLines positions={budSpokes} color={SIGNAL} opacity={0.3} />
+      )}
+
+      {/* earlier nodes — click to branch back to one */}
+      {walk.slice(0, headIndex).map((n, i) => (
+        <WalkStepDot
+          key={`${n.uri}-${i}`}
+          node={n}
+          position={toArr(walkScene[i])}
+          onStepBack={() => onStepBack(i)}
+          selected={matchKey(n, selKey)}
+          playing={matchKey(n, playKey)}
+        />
+      ))}
+
+      {/* the head — where the walk currently stands */}
+      {walk[headIndex] && walkScene[headIndex] && (
+        <WalkHeadDot
+          node={walk[headIndex]}
+          position={toArr(walkScene[headIndex])}
+          headKey={headUri ?? ""}
+          onInspect={() => onInspect(walk[headIndex])}
+          selected={matchKey(walk[headIndex], selKey)}
+          playing={matchKey(walk[headIndex], playKey)}
+        />
+      )}
+
+      {/* the buds — the champion's placeable next-track picks */}
+      {buds.map((b, i) =>
+        budScene[i] ? (
+          <WalkBudDot
+            key={b.uri}
+            bud={b}
+            position={toArr(budScene[i])}
+            index={i}
+            onPick={() => onPickBud(b)}
+          />
+        ) : null,
+      )}
+
+      <RouteFlyIn
+        goal={camGoal}
+        center={origin}
+        trigger={seedKey}
+        onArrive={onArrive}
+      />
+    </group>
+  );
+}
+
+// The walk's trail: the bright hot-magenta spine through the chosen tracks, in
+// order — the same SIGNAL language as the route's spine.
+function WalkTrail({ pts }: { pts: THREE.Vector3[] }) {
+  if (pts.length < 2) return null;
+  return (
+    <Line points={pts} color={SIGNAL} lineWidth={2} transparent opacity={0.72} />
+  );
+}
+
+// The tracer threading to a freshly picked node: a bright magenta glow travels
+// head → new head, easing out, then fades. Remounted per new segment (keyed on
+// walk length). Skipped entirely under reduced motion.
+function ThreadGlow({ from, to }: { from: THREE.Vector3; to: THREE.Vector3 }) {
+  const g = useRef<THREE.Group>(null);
+  const mat = useRef<THREE.SpriteMaterial>(null);
+  const t = useRef(0);
+  useFrame((_, delta) => {
+    if (!g.current) return;
+    if (t.current >= 1) {
+      g.current.visible = false;
+      return;
+    }
+    t.current = Math.min(1, t.current + delta / 0.7);
+    const e = 1 - Math.pow(1 - t.current, 3); // ease-out-cubic
+    g.current.visible = true;
+    g.current.position.lerpVectors(from, to, e);
+    const fade = 1 - t.current;
+    if (mat.current) mat.current.opacity = 0.85 * (0.4 + 0.6 * fade);
+  });
+  return (
+    <group ref={g}>
+      <mesh>
+        <sphereGeometry args={[0.1, 20, 20]} />
+        <meshStandardMaterial
+          color="#ffffff"
+          emissive={SIGNAL}
+          emissiveIntensity={1.7}
+          roughness={0.1}
+          toneMapped={false}
+        />
+      </mesh>
+      {haloTexture && (
+        <sprite scale={1.7}>
+          <spriteMaterial
+            ref={mat}
+            map={haloTexture}
+            color={SIGNAL}
+            blending={THREE.AdditiveBlending}
+            transparent
+            depthWrite={false}
+            opacity={0.85}
+            toneMapped={false}
+          />
+        </sprite>
+      )}
+    </group>
+  );
+}
+
+// The head of the walk: a bright white star ringed in magenta (the SIGNAL), with
+// its name always legible. It settles in (scale-out ease) whenever it changes.
+function WalkHeadDot({
+  node,
+  position,
+  headKey,
+  onInspect,
+  selected,
+  playing,
+}: {
+  node: TrackNode;
+  position: [number, number, number];
+  headKey: string;
+  onInspect: () => void;
+  selected: boolean;
+  playing: boolean;
+}) {
+  const grp = useRef<THREE.Group>(null);
+  const t = useRef(prefersReducedMotion ? 1 : 0);
+  useEffect(() => {
+    t.current = prefersReducedMotion ? 1 : 0;
+  }, [headKey]);
+  useFrame((_, delta) => {
+    if (!grp.current) return;
+    if (t.current < 1) {
+      t.current = Math.min(1, t.current + delta / 0.5);
+      const e = 1 - Math.pow(1 - t.current, 4); // ease-out-quart, no overshoot
+      grp.current.scale.setScalar(0.5 + 0.5 * e);
+    }
+  });
+  return (
+    <group ref={grp} position={position}>
+      <WalkHeadRing />
+      <GlowDot
+        position={[0, 0, 0]}
+        color="#ffffff"
+        size={0.12}
+        glow={1.3}
+        onPick={onInspect}
+        selected={selected}
+        playing={playing}
+      />
+      <Billboard position={[0, 0.5, 0]}>
+        <Text
+          fontSize={0.135}
+          color={SIGNAL}
+          anchorX="center"
+          anchorY="bottom"
+          letterSpacing={0.08}
+          outlineWidth={0.006}
+          outlineColor="#070810"
+        >
+          HERE
+        </Text>
+        <Text
+          position={[0, 0.04, 0]}
+          fontSize={0.19}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="top"
+          maxWidth={3.4}
+          outlineWidth={0.006}
+          outlineColor="#070810"
+        >
+          {node.name}
+        </Text>
+      </Billboard>
+    </group>
+  );
+}
+
+// A quiet magenta ring around the head — the walk's "you are here". Breathes
+// slowly (static under reduced motion).
+function WalkHeadRing() {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const s = prefersReducedMotion
+      ? 1
+      : 1 + Math.sin(clock.elapsedTime * 2.2) * 0.06;
+    ref.current.scale.setScalar(s);
+  });
+  return (
+    <Billboard>
+      <group ref={ref}>
+        <mesh>
+          <ringGeometry args={[0.3, 0.35, 56]} />
+          <meshBasicMaterial
+            color={SIGNAL}
+            transparent
+            opacity={0.7}
+            side={THREE.DoubleSide}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            toneMapped={false}
+          />
+        </mesh>
+      </group>
+    </Billboard>
+  );
+}
+
+// An earlier node on the walk. Dimmer than the head; click it to branch — the
+// walk truncates to here and re-buds. Hover reveals its name.
+function WalkStepDot({
+  node,
+  position,
+  onStepBack,
+  selected,
+  playing,
+}: {
+  node: TrackNode;
+  position: [number, number, number];
+  onStepBack: () => void;
+  selected: boolean;
+  playing: boolean;
+}) {
+  return (
+    <GlowDot
+      position={position}
+      color={genreColor(node.genre)}
+      size={0.07}
+      glow={0.7}
+      onPick={onStepBack}
+      label={{ name: node.name, artist: "← branch here" }}
+      selected={selected}
+      playing={playing}
+    />
+  );
+}
+
+// A bud: a champion next-track pick, placed where it lives on the map, glowing in
+// its genre hue with its name and rank always legible. Eases in (scale, ease-out-
+// quart), staggered by rank. A gentle pulse marks it as a live choice.
+function WalkBudDot({
+  bud,
+  position,
+  index,
+  onPick,
+}: {
+  bud: WalkBud;
+  position: [number, number, number];
+  index: number;
+  onPick: () => void;
+}) {
+  const grp = useRef<THREE.Group>(null);
+  // negative start = per-bud stagger delay before it grows in
+  const t = useRef(prefersReducedMotion ? 1 : -index * 0.12);
+  useFrame((_, delta) => {
+    if (!grp.current || t.current >= 1) return;
+    t.current = Math.min(1, t.current + delta / 0.42);
+    const e = t.current <= 0 ? 0 : 1 - Math.pow(1 - t.current, 4);
+    grp.current.scale.setScalar(0.0001 + e);
+  });
+  const color = genreColor(bud.genre);
+  return (
+    <group ref={grp} position={position}>
+      <BudPulse color={color} />
+      <GlowDot
+        position={[0, 0, 0]}
+        color={color}
+        size={0.08}
+        glow={1.5}
+        onPick={onPick}
+      />
+      <Billboard position={[0, 0.24, 0]}>
+        <Text
+          fontSize={0.1}
+          color={color}
+          anchorX="center"
+          anchorY="bottom"
+          letterSpacing={0.04}
+          outlineWidth={0.006}
+          outlineColor="#070810"
+        >
+          {`PICK ${bud.rank}`}
+        </Text>
+        <Text
+          position={[0, 0.03, 0]}
+          fontSize={0.13}
+          color="#fbf7ee"
+          anchorX="center"
+          anchorY="top"
+          maxWidth={3}
+          outlineWidth={0.006}
+          outlineColor="#070810"
+        >
+          {bud.name}
+        </Text>
+      </Billboard>
+    </group>
+  );
+}
+
+// The bud's live-choice pulse — a slow expanding halo in its genre hue.
+function BudPulse({ color }: { color: string }) {
+  const mat = useRef<THREE.SpriteMaterial>(null);
+  const spr = useRef<THREE.Sprite>(null);
+  useFrame(({ clock }) => {
+    if (prefersReducedMotion || !mat.current || !spr.current) return;
+    const k = (Math.sin(clock.elapsedTime * 2.4) + 1) / 2;
+    mat.current.opacity = 0.28 + 0.34 * k;
+    const s = 1.0 + 0.5 * k;
+    spr.current.scale.setScalar(s);
+  });
+  if (!haloTexture) return null;
+  return (
+    <sprite ref={spr} scale={1.1}>
+      <spriteMaterial
+        ref={mat}
+        map={haloTexture}
+        color={color}
+        blending={THREE.AdditiveBlending}
+        transparent
+        depthWrite={false}
+        opacity={0.4}
+        toneMapped={false}
+      />
+    </sprite>
   );
 }
 

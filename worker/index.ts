@@ -26,6 +26,10 @@ import {
   sample_field,
   embed_track,
   embed_track_open,
+  load_champion,
+  champion_info,
+  champion_resolve,
+  extend_session,
 } from "../worker-core/pkg/worker_core.js";
 import wasmModule from "../worker-core/pkg/worker_core_bg.wasm";
 
@@ -118,6 +122,64 @@ async function ensureReady(env: Env): Promise<CoreState> {
     })();
   }
   return ready;
+}
+
+// ---- next-track champion (R'+M+C' "extend a session") ----------------------
+// The promoted champion runs in-isolate from the baked champion.bin. It's
+// independent of the pathfinder corpus and much larger (~24 MB), so it is
+// loaded LAZILY on the first /api/extend rather than in ensureReady, keeping
+// the pathfinder routes fast for users who never touch the feature.
+interface ChampionState {
+  nItems: number;
+  dim: number;
+  hidden: number;
+}
+let championReady: Promise<ChampionState> | null = null;
+
+async function ensureChampion(env: Env): Promise<ChampionState> {
+  if (!championReady) {
+    championReady = (async () => {
+      await ensureReady(env); // guarantees initSync() (WASM) has run
+      const bin = await assetBytes(env, "/data/champion.bin");
+      if (!bin) {
+        championReady = null; // allow a retry on the next request
+        throw new ApiError(503, "champion.bin asset missing — run tools/build_champion.py");
+      }
+      load_champion(bin);
+      const inf = JSON.parse(champion_info());
+      return { nItems: inf.n_items as number, dim: inf.dim as number, hidden: inf.hidden as number };
+    })();
+  }
+  return championReady;
+}
+
+// POST /api/extend — extend a session with the champion's next-track ranking.
+// Body: { prefix: [uri|id|url|index, ...] (ordered oldest→newest), k?: number }.
+// Tokens are resolved to champion vocab indices (full uri / bare id / Spotify
+// url / integer index, mirroring seq_common.resolve_prefix); unknown/cold ones
+// are dropped with a warning. Returns the top-k predicted next tracks.
+async function buildExtend(env: Env, payload: any) {
+  const champ = await ensureChampion(env);
+  const rawPrefix: unknown[] = Array.isArray(payload?.prefix) ? payload.prefix : [];
+  const k = Math.max(1, Math.min(50, parseInt(String(payload?.k ?? 10), 10) || 10));
+
+  const resolved: number[] = [];
+  const dropped: string[] = [];
+  for (const tok of rawPrefix) {
+    const token = typeof tok === "number" ? String(tok) : String(tok ?? "").trim();
+    if (!token) continue;
+    const idx = champion_resolve(token);
+    if (idx >= 0) resolved.push(idx);
+    else dropped.push(token);
+  }
+  if (resolved.length === 0) {
+    throw new ApiError(
+      400,
+      "no prefix token resolved to a known track in the champion vocab (all cold / unknown)",
+    );
+  }
+  const suggestions = JSON.parse(extend_session(new Uint32Array(resolved), k));
+  return { k, prefix_indices: resolved, dropped, vocab: champ.nItems, suggestions };
 }
 
 // Rescale a raw cold-start fit (post nan/clip, already in [0,1]) onto the baked
@@ -633,6 +695,9 @@ const AIRS: Record<string, { label: string; match: string[] }> = {
 interface DriftIndex {
   genre: string[]; // lowercased genre_primary per row
   fit: Float32Array;
+  year: Int16Array; // release_year per row; 0 = unknown (a valid year is never 0)
+  yearMin: number; // span of known years across the corpus — the drift era-slider bounds
+  yearMax: number;
   counts: Map<string, number>; // genre → number of tracks (the tuning catalog)
 }
 let driftIndex: DriftIndex | null = null;
@@ -640,19 +705,37 @@ function ensureDriftIndex(n: number): DriftIndex {
   if (driftIndex) return driftIndex;
   const genre = new Array<string>(n);
   const fit = new Float32Array(n);
+  const year = new Int16Array(n);
   const counts = new Map<string, number>();
+  let yearMin = Infinity;
+  let yearMax = -Infinity;
   for (let r = 0; r < n; r += 1) {
     let g = "";
+    let y = 0;
     try {
-      g = (JSON.parse(meta_at(r)).genre ?? "").toString().toLowerCase();
+      const m = JSON.parse(meta_at(r));
+      g = (m.genre ?? "").toString().toLowerCase();
+      if (typeof m.release_year === "number" && m.release_year > 0) y = m.release_year;
     } catch {
       /* leave blank — never matches, still routable */
     }
     genre[r] = g;
     fit[r] = fit_at(r);
+    year[r] = y;
+    if (y > 0) {
+      if (y < yearMin) yearMin = y;
+      if (y > yearMax) yearMax = y;
+    }
     if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
   }
-  driftIndex = { genre, fit, counts };
+  driftIndex = {
+    genre,
+    fit,
+    year,
+    yearMin: Number.isFinite(yearMin) ? yearMin : 0,
+    yearMax: Number.isFinite(yearMax) ? yearMax : 0,
+    counts,
+  };
   return driftIndex;
 }
 
@@ -700,14 +783,41 @@ async function buildDrift(_env: Env, payload: any, state: CoreState) {
     ? Math.max(20, Math.min(250, Math.round(Number(payload.count))))
     : Math.round(70 + clamp01(Number(payload.breadth ?? 0.5)) * 130);
 
-  // Pool = every row in the chosen blend. Fall back to the whole corpus if it
-  // lands thin, so a drift never dead-ends.
+  // Optional era window (pre-drift): [lo, hi] release years. Unlike a post-hoc
+  // filter, this constrains the gather *before* it runs — only tracks with a
+  // known year in range join the sky (unknown-year tracks are era-less, so a
+  // window excludes them). We keep drawing anchors until `count` land, so a
+  // window narrows the era without starving the constellation.
+  const yr: [number, number] | null =
+    Array.isArray(payload.year) &&
+    payload.year.length === 2 &&
+    Number.isFinite(Number(payload.year[0])) &&
+    Number.isFinite(Number(payload.year[1]))
+      ? [
+          Math.min(Number(payload.year[0]), Number(payload.year[1])),
+          Math.max(Number(payload.year[0]), Number(payload.year[1])),
+        ]
+      : null;
+  const rowInEra = (r: number) =>
+    !yr || (idx.year[r] > 0 && idx.year[r] >= yr[0] && idx.year[r] <= yr[1]);
+  const inEra = (nd: any) => {
+    if (!yr) return true;
+    const y = nd.release_year;
+    return typeof y === "number" && y >= yr[0] && y <= yr[1];
+  };
+
+  // Pool = every row in the chosen blend within the era. Fall back to the whole
+  // era (relaxing only the blend) if it lands thin, so a drift never dead-ends —
+  // an active window is always honoured, even in the fallback.
   let pool: number[] = [];
   for (let r = 0; r < state.tracks; r += 1) {
-    if (inBlend(idx.genre[r])) pool.push(r);
+    if (inBlend(idx.genre[r]) && rowInEra(r)) pool.push(r);
   }
   const pooled = pool.length;
-  if (pool.length < 30) pool = Array.from({ length: state.tracks }, (_, r) => r);
+  if (pool.length < 30) {
+    pool = [];
+    for (let r = 0; r < state.tracks; r += 1) if (rowInEra(r)) pool.push(r);
+  }
 
   // Scatter anchors across a fit-band window centred on the familiarity dial —
   // several tight knots rather than one, so the sky is diverse and stays loyal to
@@ -717,30 +827,43 @@ async function buildDrift(_env: Env, payload: any, state: CoreState) {
   const lo = Math.max(0, Math.floor((familiarity - half) * byFit.length));
   const hi = Math.max(lo + 1, Math.min(byFit.length, Math.ceil((familiarity + half) * byFit.length)));
   const band = byFit.slice(lo, hi);
-  // Scatter a handful of seeds across the fit-band and grow a neighbourhood field
-  // from each (sample_field: a connected BFS slice of the manifold, up to a few
-  // hundred positioned nodes per call — far higher in-blend yield than the 20-wide
-  // KNN fan-out). We then keep the in-blend tracks and let focus decide the bleed.
-  const nSeeds = Math.min(band.length, 30, Math.max(8, Math.ceil(count / 8)));
+  // Scatter seeds across the fit-band and grow a neighbourhood field from each
+  // (sample_field: a connected BFS slice of the manifold, up to a few hundred
+  // positioned nodes per call — far higher in-blend yield than the 20-wide KNN
+  // fan-out). We keep the in-blend tracks and let focus decide the bleed. A
+  // neighbourhood is genre-coherent, not year-coherent, so an era window thins
+  // the per-seed yield — allow many more anchors (up to the whole band) so the
+  // gather still reaches `count`; without a window, keep the original tight scatter.
+  const baseSeeds = Math.min(band.length, 30, Math.max(8, Math.ceil(count / 8)));
+  const maxFields = yr ? Math.min(band.length, 160) : baseSeeds;
   const perSeed = Math.min(220, Math.max(90, count));
-  const seedSet = new Set<number>();
-  let guard = 0;
-  while (seedSet.size < nSeeds && guard < nSeeds * 12) {
-    seedSet.add(band[Math.floor(Math.random() * band.length)]);
-    guard += 1;
-  }
 
-  // Merge the fields; keep the in-blend tracks first; cap per artist so no one act
-  // swallows the sky. Baked global-layout coords, so every field shares one space.
+  // Merge the fields; keep the in-blend, in-era tracks first; cap per artist so no
+  // one act swallows the sky. Baked global-layout coords, so every field shares
+  // one space. Keep drawing distinct anchors until `count` in-blend land (or the
+  // era's band is exhausted) — but always do the base scatter first for diversity.
   const seen = new Set<string>();
   const perArtist = new Map<string, number>();
   const inGenre: any[] = [];
   const near: any[] = [];
-  for (const s of seedSet) {
+  const tried = new Set<number>();
+  let seed0 = 0;
+  let guard = 0;
+  while (
+    tried.size < maxFields &&
+    guard < maxFields * 12 &&
+    (inGenre.length < count || tried.size < baseSeeds)
+  ) {
+    guard += 1;
+    const s = band[Math.floor(Math.random() * band.length)];
+    if (tried.has(s)) continue;
+    tried.add(s);
+    if (!seed0) seed0 = s;
     const field = JSON.parse(sample_field(s, perSeed)) as any[];
     for (const nd of field) {
       if (seen.has(nd.id)) continue;
       seen.add(nd.id);
+      if (!inEra(nd)) continue;
       const artist = (nd.artist ?? "").toLowerCase();
       const used = perArtist.get(artist) ?? 0;
       if (used >= DRIFT_ARTIST_CAP) continue;
@@ -773,8 +896,9 @@ async function buildDrift(_env: Env, payload: any, state: CoreState) {
     genresIn: [...chosen], // echo the requested blend
     familiarity,
     focus,
+    year: yr, // the era window the gather was constrained to (null = all years)
     requested: count,
-    seed: [...seedSet][0] ?? 0,
+    seed: seed0,
     pooled, // how large the chosen blend was (before any fallback)
     count: kept.length,
     genres,
@@ -1315,6 +1439,7 @@ function openApiSpec(origin: string) {
                     familiarity: { type: "number", minimum: 0, maximum: 1, default: 0.35 },
                     focus: { type: "number", minimum: 0, maximum: 1, default: 0.3 },
                     count: { type: "integer", minimum: 20, maximum: 250, default: 100 },
+                    year: { type: "array", items: { type: "integer" }, minItems: 2, maxItems: 2, nullable: true, example: [1990, 1999], description: "Optional [min, max] release-year window; constrains the gather to that era (unknown-year tracks excluded). See year_min/year_max in GET /api/config." },
                     air: { type: "string", example: "nocturne", description: "Legacy preset used only when genres is empty." },
                   },
                 },
@@ -1373,7 +1498,7 @@ function openApiSpec(origin: string) {
       "/api/config": {
         get: {
           summary: "Public client config",
-          responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { spotify_client_id: { type: "string", nullable: true } } } } } } },
+          responses: { "200": { description: "OK", content: { "application/json": { schema: { type: "object", properties: { spotify_client_id: { type: "string", nullable: true }, year_min: { type: "integer", nullable: true }, year_max: { type: "integer", nullable: true } } } } } } },
         },
       },
     },
@@ -1399,7 +1524,14 @@ export default {
         if (url.pathname === "/api/config") {
           // client id is public (not secret) — the browser needs it for the
           // PKCE playlist-export flow. null hides the playlist button in the UI.
-          return json({ spotify_client_id: env.SPOTIFY_CLIENT_ID ?? null });
+          // year_min/year_max are the corpus's known-year span — the bounds for
+          // the Drift era slider (which constrains the gather before it runs).
+          const di = ensureDriftIndex(state.tracks);
+          return json({
+            spotify_client_id: env.SPOTIFY_CLIENT_ID ?? null,
+            year_min: di.yearMin || null,
+            year_max: di.yearMax || null,
+          });
         }
         if (url.pathname === "/api/preview" && request.method === "GET") {
           const artist = (url.searchParams.get("artist") ?? "").trim();
@@ -1539,6 +1671,12 @@ export default {
         if (url.pathname === "/api/arrange" && request.method === "POST") {
           const payload = await request.json().catch(() => ({}));
           return json(await buildArrange(env, payload, state));
+        }
+        // Extend a session: run the promoted next-track champion (R'+M+C') over
+        // an ordered prefix of tracks and return its predicted next tracks.
+        if (url.pathname === "/api/extend" && request.method === "POST") {
+          const payload = await request.json().catch(() => ({}));
+          return json(await buildExtend(env, payload));
         }
         // BYOP: read a PUBLIC playlist's tracks by url/id (client-credentials).
         if (url.pathname === "/api/playlist" && request.method === "GET") {

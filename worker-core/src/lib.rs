@@ -3,6 +3,7 @@
 //! exposes search / snap / route over `wasm-bindgen`. All heavy numeric work
 //! (A*, densify, PCA) lives here; the TS Worker owns I/O and bindings.
 
+pub mod champion;
 pub mod pathfind;
 pub mod pca;
 pub mod project;
@@ -10,6 +11,7 @@ pub mod scorer;
 pub mod snapshot;
 pub mod transit;
 
+use champion::Champion;
 use pathfind::{EndSpec, OrderNode};
 use project::Projector;
 use scorer::Scorer;
@@ -39,10 +41,86 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    // The promoted next-track champion (R'+M+C'), loaded independently of the
+    // pathfinder corpus from the baked champion.bin (see champion.rs).
+    static CHAMPION: RefCell<Option<Champion>> = const { RefCell::new(None) };
 }
 
 fn err(msg: impl Into<String>) -> JsValue {
     JsValue::from_str(&msg.into())
+}
+
+// --------------------------------------------------------------------------- //
+// Next-track champion: "extend a session" (R'+M+C' z-blend in WASM).          //
+// Loaded once per isolate from champion.bin, independent of the corpus.       //
+// --------------------------------------------------------------------------- //
+#[wasm_bindgen]
+pub fn load_champion(bytes: &[u8]) -> Result<(), JsValue> {
+    let champ = Champion::parse(bytes).map_err(err)?;
+    CHAMPION.with(|c| *c.borrow_mut() = Some(champ));
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn champion_info() -> Result<String, JsValue> {
+    CHAMPION.with(|c| {
+        let b = c.borrow();
+        let champ = b.as_ref().ok_or_else(|| err("champion not loaded"))?;
+        Ok(json!({
+            "n_items": champ.n_items,
+            "dim": champ.dim,
+            "hidden": champ.hidden,
+        })
+        .to_string())
+    })
+}
+
+/// Resolve one serving token (full uri / bare id / Spotify url / integer vocab
+/// index) to a champion vocab item index, or -1 if unknown (cold / not in the
+/// champion vocab). Mirrors seq_common.resolve_prefix per token; the Worker
+/// drops -1 tokens with a warning.
+#[wasm_bindgen]
+pub fn champion_resolve(token: &str) -> Result<i32, JsValue> {
+    CHAMPION.with(|c| {
+        let b = c.borrow();
+        let champ = b.as_ref().ok_or_else(|| err("champion not loaded"))?;
+        Ok(champ.resolve(token).map(|i| i as i32).unwrap_or(-1))
+    })
+}
+
+/// Rank the champion's predicted next tracks for a session prefix (ordered
+/// vocab item indices, oldest -> newest). Returns a JSON array of
+/// {item_index, uri, name, artist, genre, score}, best-first, excluding the
+/// prefix items (next-distinct), top-k.
+#[wasm_bindgen]
+pub fn extend_session(prefix_ids: &[u32], k: usize) -> Result<String, JsValue> {
+    CHAMPION.with(|c| {
+        let b = c.borrow();
+        let champ = b.as_ref().ok_or_else(|| err("champion not loaded"))?;
+        let prefix: Vec<usize> = prefix_ids
+            .iter()
+            .map(|&i| i as usize)
+            .filter(|&i| i < champ.n_items)
+            .collect();
+        if prefix.is_empty() {
+            return Err(err("extend_session: empty/invalid prefix"));
+        }
+        let items: Vec<Value> = champ
+            .extend(&prefix, k)
+            .into_iter()
+            .map(|it| {
+                json!({
+                    "item_index": it.item_index,
+                    "uri": it.uri,
+                    "name": it.name,
+                    "artist": it.artist,
+                    "genre": it.genre,
+                    "score": it.score,
+                })
+            })
+            .collect();
+        Ok(Value::Array(items).to_string())
+    })
 }
 
 #[wasm_bindgen]
